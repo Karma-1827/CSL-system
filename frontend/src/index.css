@@ -1,0 +1,14 @@
+@import "tailwindcss";
+
+@theme {
+  /* 根據你提供的配色方案 (image_10.png) 定義 custom 顏色 */
+  --color-csl-950: #020708; /* 最深色 */
+  --color-csl-900: #1C3D46; /* 次深色 */
+  --color-csl-primary: #3F6E88; /* 主色：灰藍色 */
+  --color-csl-700: #73A1C9; /* 淺藍色 */
+  --color-csl-200: #C4D3EB; /* 最淺藍色 */
+  
+  /* 定義主色，方便之後直接使用 */
+  --color-primary: var(--color-csl-primary);
+  --color-primary-dark: var(--color-csl-900);
+}
