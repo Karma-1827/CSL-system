@@ -106,6 +106,11 @@ function TutorDashboard() {
 
   const [hasSentAlert, setHasSentAlert] = useState(false);
 
+  // ── 輔導時數相關 state ──────────────────────────────
+  const [hoursData, setHoursData] = useState([]);
+  const [approvedHours, setApprovedHours] = useState(0);
+  const [certStatus, setCertStatus] = useState(null);
+
   const handleEmergencyAlert = async (cls) => {
     if (
       !window.confirm(
@@ -120,7 +125,7 @@ function TutorDashboard() {
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userId: userInfo.user_id, role: "tutor" }), // tutee 改 'tutee'
+          body: JSON.stringify({ userId: userInfo.user_id, role: "tutor" }),
         },
       );
       const data = await res.json();
@@ -148,6 +153,26 @@ function TutorDashboard() {
       });
   };
 
+  // ── 輔導時數 fetch ──────────────────────────────────
+  const fetchHours = (userId) => {
+    fetch(`http://localhost:3001/api/tutor/hours/${userId}`)
+      .then((res) => res.json())
+      .then((result) => {
+        if (result.success) {
+          setHoursData(result.data);
+          setApprovedHours(result.approvedHours || 0);
+        }
+      });
+  };
+
+  const fetchCertStatus = (userId) => {
+    fetch(`http://localhost:3001/api/tutor/certificate-status/${userId}`)
+      .then((res) => res.json())
+      .then((result) => {
+        if (result.success && result.data) setCertStatus(result.data.status);
+      });
+  };
+
   useEffect(() => {
     const account = localStorage.getItem("loggedInAccount");
     if (account) {
@@ -166,6 +191,9 @@ function TutorDashboard() {
               fetchClasses(result.data.user_id);
               fetchMakeupRemaining(result.data.user_id);
               fetchNotesRemaining(result.data.user_id);
+              // ── 新增 ──
+              fetchHours(result.data.user_id);
+              fetchCertStatus(result.data.user_id);
             }
           }
         });
@@ -249,7 +277,7 @@ function TutorDashboard() {
 
     const formData = new FormData();
     formData.append("userId", userInfo.user_id);
-    formData.append("role", "tutor"); // tutee 改成 'tutee'
+    formData.append("role", "tutor");
     formData.append("reportType", reportForm.reportType);
     formData.append("location", reportForm.location);
     formData.append("content", reportForm.content);
@@ -423,14 +451,12 @@ function TutorDashboard() {
     }
   };
 
-  // ✨ 修正：先計算 isDeadlinePassed 再放進 setNotesModal
   const handleOpenNotesModal = async (cls) => {
     const dateStr = cls.class_date.split("T")[0];
     const [year, month, day] = dateStr.split("-").map(Number);
-    // 用本地時間建立，避免時區偏移
     const displayDate = new Date(year, month - 1, day);
     const deadline = new Date(`${dateStr}T23:59:59`);
-    const isDeadlinePassed = new Date() > deadline; // ✅ 先宣告
+    const isDeadlinePassed = new Date() > deadline;
 
     setNotesModal({
       isOpen: true,
@@ -438,7 +464,7 @@ function TutorDashboard() {
       classDate: dateStr,
       startTime: cls.start_time.substring(0, 5),
       endTime: cls.end_time.substring(0, 5),
-      isDeadlinePassed, // ✅ 再使用
+      isDeadlinePassed,
     });
 
     try {
@@ -528,8 +554,8 @@ function TutorDashboard() {
 
     const renderClassCard = (cls, type = "normal") => {
       const dateStr = cls.class_date.split("T")[0];
-      const [year, month, day] = dateStr.split("-").map(Number); // ✅ 加這行
-      const displayDate = new Date(year, month - 1, day); // ✅ 加這行
+      const [year, month, day] = dateStr.split("-").map(Number);
+      const displayDate = new Date(year, month - 1, day);
       const isPast = type === "past";
       const isUpcoming = type === "upcoming";
 
@@ -571,7 +597,6 @@ function TutorDashboard() {
                   即將上課
                 </span>
               )}
-              {/* ✨ 緊急通報按鈕：只在上課時間內顯示 */}
               {isUpcoming &&
                 (() => {
                   const now = new Date();
@@ -598,7 +623,6 @@ function TutorDashboard() {
           </div>
 
           <div className="grid grid-cols-4 gap-2 pt-3 border-t border-slate-100">
-            {/* 編輯時間 */}
             {!isPast ? (
               <button
                 onClick={() =>
@@ -625,7 +649,6 @@ function TutorDashboard() {
               </button>
             )}
 
-            {/* 老師簽到 */}
             {(() => {
               const deadline = new Date(`${dateStr}T23:59:59`);
               const nowTime = new Date();
@@ -673,16 +696,12 @@ function TutorDashboard() {
               }
             })()}
 
-            {/* 課堂紀錄 */}
             {(() => {
               const dateStr = cls.class_date.split("T")[0];
-              const [year, month, day] = dateStr.split("-").map(Number);
-              const displayDate = new Date(year, month - 1, day);
               const deadline = new Date(`${dateStr}T23:59:59`);
               const isNoteDeadlinePassed = new Date() > deadline;
 
               if (cls.has_note) {
-                // 已填寫：永遠顯示綠色
                 return (
                   <button
                     onClick={() => handleOpenNotesModal(cls)}
@@ -693,7 +712,6 @@ function TutorDashboard() {
                   </button>
                 );
               } else if (isNoteDeadlinePassed) {
-                // 超過截止：紅色補填
                 return (
                   <button
                     onClick={() => handleOpenNotesModal(cls)}
@@ -704,7 +722,6 @@ function TutorDashboard() {
                   </button>
                 );
               } else {
-                // 正常時間內
                 return (
                   <button
                     onClick={() => handleOpenNotesModal(cls)}
@@ -717,7 +734,6 @@ function TutorDashboard() {
               }
             })()}
 
-            {/* 異常回報 */}
             <button
               onClick={() =>
                 setReportModal({
@@ -1307,7 +1323,6 @@ function TutorDashboard() {
                         <button
                           disabled
                           className="p-2 text-slate-300 cursor-not-allowed rounded-lg mr-2"
-                          title="已過去的課程無法修改"
                         >
                           <Edit size={18} />
                         </button>
@@ -1328,7 +1343,6 @@ function TutorDashboard() {
                             })
                           }
                           className="p-2 text-slate-400 hover:bg-blue-50 hover:text-blue-600 rounded-lg transition mr-2"
-                          title="修改上課時間"
                         >
                           <Edit size={18} />
                         </button>
@@ -1345,7 +1359,6 @@ function TutorDashboard() {
         </div>
       </div>
 
-      {/* 排課 Modal */}
       {isScheduleModalOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-fade-in">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
@@ -1507,6 +1520,327 @@ function TutorDashboard() {
     </main>
   );
 
+  // --- 介面 6：輔導時數 ─────────────────────────────────────
+  const renderHours = () => {
+    const TARGET_HOURS = 100;
+    const pct = Math.min((approvedHours / TARGET_HOURS) * 100, 100);
+
+    const rows = hoursData.map((r) => {
+      const hasSigned = !!r.tutor_signed_at;
+      const hasNote = !!r.note_id;
+      const hrs = parseFloat(r.hours || 0);
+      const dateStr = r.class_date;
+      const [y, m, d] = dateStr.split("-").map(Number);
+      const displayDate = new Date(y, m - 1, d);
+      return { ...r, hasSigned, hasNote, hrs, displayDate };
+    });
+
+    const handleSubmitForReview = async (classId) => {
+      if (!window.confirm("確認送出此堂課的時數審查？")) return;
+      try {
+        const res = await fetch(
+          `http://localhost:3001/api/tutor/hours/submit/${classId}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ userId: userInfo.user_id }),
+          },
+        );
+        const data = await res.json();
+        alert(data.message);
+        if (data.success) fetchHours(userInfo.user_id);
+      } catch {
+        alert("連線錯誤");
+      }
+    };
+
+    const handleApplyCert = async () => {
+      if (!window.confirm("確認申請實習時數證明？申請後請等待管理員審核。"))
+        return;
+      try {
+        const res = await fetch(
+          "http://localhost:3001/api/tutor/apply-certificate",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ userId: userInfo.user_id }),
+          },
+        );
+        const data = await res.json();
+        alert(data.message);
+        if (data.success) fetchCertStatus(userInfo.user_id);
+      } catch {
+        alert("連線錯誤");
+      }
+    };
+
+    const statusBadge = (row) => {
+      if (row.review_status === "approved")
+        return (
+          <span className="px-2.5 py-1 bg-green-100 text-green-700 text-xs font-bold rounded-full flex items-center gap-1 w-fit">
+            <CheckCircle size={12} /> 已核准
+          </span>
+        );
+      if (row.review_status === "pending")
+        return (
+          <span className="px-2.5 py-1 bg-amber-100 text-amber-700 text-xs font-bold rounded-full flex items-center gap-1 w-fit">
+            <Clock size={12} /> 審查中
+          </span>
+        );
+      if (row.review_status === "rejected")
+        return (
+          <span className="px-2.5 py-1 bg-red-100 text-red-700 text-xs font-bold rounded-full flex items-center gap-1 w-fit">
+            <AlertCircle size={12} /> 未通過
+          </span>
+        );
+      // 還沒送審
+      if (row.hasSigned && row.hasNote)
+        return (
+          <button
+            onClick={() => handleSubmitForReview(row.class_id)}
+            className="px-2.5 py-1 bg-blue-500 text-white text-xs font-bold rounded-full hover:bg-blue-600 transition w-fit"
+          >
+            送出審查
+          </button>
+        );
+      return (
+        <span className="px-2.5 py-1 bg-slate-100 text-slate-500 text-xs font-bold rounded-full w-fit">
+          {!row.hasSigned && !row.hasNote
+            ? "需簽到＋填紀錄"
+            : !row.hasSigned
+              ? "需完成簽到"
+              : "需填寫紀錄"}
+        </span>
+      );
+    };
+
+    const certButton = () => {
+      if (certStatus === "issued")
+        return (
+          <div className="flex items-center gap-2 px-6 py-3 bg-green-100 text-green-700 font-bold rounded-xl border border-green-200">
+            <CheckCircle size={18} /> 證書已核發，請聯絡助教領取
+          </div>
+        );
+      if (certStatus === "pending")
+        return (
+          <div className="flex items-center gap-2 px-6 py-3 bg-amber-100 text-amber-700 font-bold rounded-xl border border-amber-200">
+            <Clock size={18} /> 申請審核中，請靜候通知
+          </div>
+        );
+      return (
+        <button
+          onClick={handleApplyCert}
+          disabled={approvedHours < TARGET_HOURS}
+          className={`px-6 py-3 font-bold rounded-xl transition shadow-md flex items-center gap-2 ${
+            approvedHours >= TARGET_HOURS
+              ? "bg-primary text-white hover:bg-primary-dark"
+              : "bg-slate-200 text-slate-400 cursor-not-allowed"
+          }`}
+        >
+          <Award size={18} />
+          申請實習時數證明
+          {approvedHours < TARGET_HOURS && (
+            <span className="text-xs font-normal ml-1">
+              （還差 {(TARGET_HOURS - approvedHours).toFixed(1)} 小時）
+            </span>
+          )}
+        </button>
+      );
+    };
+
+    return (
+      <main className="flex-grow w-full flex flex-col gap-6 animate-fade-in">
+        {/* 時數進度卡 */}
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+          <div className="bg-gradient-to-r from-slate-700 to-slate-500 px-8 py-5">
+            <h2 className="font-bold text-white text-lg flex items-center gap-2">
+              <Award size={20} /> 輔導時數累積
+            </h2>
+            <p className="text-slate-300 text-sm mt-1">
+              畢業條件：累積 100 小時輔導時數（需管理員審查通過）
+            </p>
+          </div>
+          <div className="p-8">
+            <div className="flex items-end gap-3 mb-5">
+              <span className="text-6xl font-black text-slate-800 tabular-nums">
+                {approvedHours.toFixed(1)}
+              </span>
+              <span className="text-2xl font-bold text-slate-400 mb-1.5">
+                / {TARGET_HOURS} 小時
+              </span>
+              <span
+                className={`ml-auto text-sm font-bold px-3 py-1.5 rounded-full ${
+                  pct >= 100
+                    ? "bg-green-100 text-green-700"
+                    : "bg-slate-100 text-slate-500"
+                }`}
+              >
+                {pct >= 100 ? "🎉 已達標！" : `${pct.toFixed(1)}%`}
+              </span>
+            </div>
+            {/* 進度條 */}
+            <div className="w-full bg-slate-100 rounded-full h-5 overflow-hidden">
+              <div
+                className={`h-5 rounded-full transition-all duration-700 ${
+                  pct >= 100 ? "bg-green-500" : "bg-primary"
+                }`}
+                style={{ width: `${pct}%` }}
+              />
+            </div>
+            <div className="flex justify-between text-xs font-bold text-slate-400 mt-2">
+              <span>0 hr</span>
+              <span>25 hr</span>
+              <span>50 hr</span>
+              <span>75 hr</span>
+              <span>100 hr</span>
+            </div>
+          </div>
+        </div>
+
+        {/* 課堂時數明細 */}
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+          <div className="bg-slate-50 px-8 py-4 border-b border-slate-100 flex justify-between items-center">
+            <h3 className="font-bold text-slate-700 flex items-center gap-2">
+              <FileText size={18} className="text-primary" /> 課堂時數明細
+            </h3>
+            <span className="text-xs text-slate-400 font-medium">
+              共 {rows.length} 堂課
+            </span>
+          </div>
+
+          {rows.length === 0 ? (
+            <div className="py-16 text-center text-slate-400 font-medium">
+              <Calendar size={40} className="mx-auto mb-3 text-slate-200" />
+              尚無任何課程紀錄
+            </div>
+          ) : (
+            <div className="divide-y divide-slate-100">
+              {/* 表頭（桌面版） */}
+              <div className="hidden md:grid grid-cols-[2fr_1fr_1fr_1fr_1.5fr] px-6 py-3 bg-slate-50/80 text-xs font-bold text-slate-400 uppercase tracking-wider">
+                <span>日期 / 時間</span>
+                <span>時長</span>
+                <span>老師簽到</span>
+                <span>課堂紀錄</span>
+                <span>審查狀態</span>
+              </div>
+
+              {rows.map((row) => (
+                <div
+                  key={row.class_id}
+                  className={`grid grid-cols-1 md:grid-cols-[2fr_1fr_1fr_1fr_1.5fr] px-6 py-4 items-center gap-3 transition ${
+                    row.review_status === "approved"
+                      ? "bg-green-50/40"
+                      : row.review_status === "rejected"
+                        ? "bg-red-50/20"
+                        : "hover:bg-slate-50"
+                  }`}
+                >
+                  {/* 日期 */}
+                  <div className="flex items-center gap-3">
+                    <div
+                      className={`w-11 h-11 rounded-xl flex flex-col items-center justify-center flex-shrink-0 ${
+                        row.review_status === "approved"
+                          ? "bg-green-100 text-green-700"
+                          : "bg-slate-100 text-slate-500"
+                      }`}
+                    >
+                      <span className="text-[9px] font-bold uppercase">
+                        {row.displayDate.toLocaleDateString("en-US", {
+                          month: "short",
+                        })}
+                      </span>
+                      <span className="text-sm font-black leading-none">
+                        {row.displayDate.getDate()}
+                      </span>
+                    </div>
+                    <div>
+                      <p className="font-bold text-slate-700 text-sm">
+                        {row.class_date}
+                      </p>
+                      <p className="text-xs text-slate-400">
+                        {row.start_time.substring(0, 5)} ~{" "}
+                        {row.end_time.substring(0, 5)}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* 時長 */}
+                  <div className="flex items-baseline gap-1">
+                    <span
+                      className={`font-black text-xl ${
+                        row.review_status === "approved"
+                          ? "text-green-600"
+                          : "text-slate-700"
+                      }`}
+                    >
+                      {row.hrs.toFixed(1)}
+                    </span>
+                    <span className="text-xs text-slate-400 font-bold">hr</span>
+                  </div>
+
+                  {/* 老師簽到 */}
+                  <div>
+                    {row.hasSigned ? (
+                      <span className="flex items-center gap-1 text-green-600 text-xs font-bold">
+                        <CheckCircle size={14} /> 已簽到
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-1 text-slate-400 text-xs font-bold">
+                        <AlertCircle size={14} /> 未簽到
+                      </span>
+                    )}
+                  </div>
+
+                  {/* 課堂紀錄 */}
+                  <div>
+                    {row.hasNote ? (
+                      <span className="flex items-center gap-1 text-green-600 text-xs font-bold">
+                        <CheckCircle size={14} /> 已填寫
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-1 text-slate-400 text-xs font-bold">
+                        <AlertCircle size={14} /> 未填寫
+                      </span>
+                    )}
+                  </div>
+
+                  {/* 審查狀態 */}
+                  <div>{statusBadge(row)}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* 申請證書區 */}
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-8 flex flex-col sm:flex-row items-center justify-between gap-6">
+          <div>
+            <h3 className="font-bold text-slate-800 text-lg flex items-center gap-2">
+              <Award size={20} className="text-primary" /> 申請實習時數證明
+            </h3>
+            <p className="text-sm text-slate-500 mt-1">
+              累積 100 小時審查通過後，即可送出申請，由管理員核發正式證明文件
+            </p>
+            {approvedHours > 0 && approvedHours < TARGET_HOURS && (
+              <p className="text-xs text-amber-600 font-bold mt-2">
+                ⏳ 目前已累積{" "}
+                <span className="text-lg font-black">
+                  {approvedHours.toFixed(1)}
+                </span>{" "}
+                小時，距離目標還差{" "}
+                <span className="font-black">
+                  {(TARGET_HOURS - approvedHours).toFixed(1)}
+                </span>{" "}
+                小時，加油！
+              </p>
+            )}
+          </div>
+          {certButton()}
+        </div>
+      </main>
+    );
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
       <header className="bg-white shadow-sm h-16 flex items-center justify-between px-6 sticky top-0 z-20">
@@ -1531,11 +1865,11 @@ function TutorDashboard() {
             >
               課表
             </button>
-            <button className="px-5 py-1.5 text-slate-500 font-medium hover:text-primary transition text-sm">
-              紀錄
-            </button>
-            <button className="px-5 py-1.5 text-slate-500 font-medium hover:text-primary transition text-sm">
-              紙本
+            <button
+              onClick={() => setActiveTab("hours")}
+              className={`px-5 py-1.5 font-bold rounded-md shadow-sm text-sm transition ${activeTab === "hours" ? "bg-white text-primary" : "text-slate-500 hover:text-primary"}`}
+            >
+              輔導時數
             </button>
           </nav>
         </div>
@@ -1638,6 +1972,28 @@ function TutorDashboard() {
                 />{" "}
                 課表
               </li>
+              {/* ── 新增：輔導時數 ── */}
+              <li
+                onClick={() => setActiveTab("hours")}
+                className={`flex items-center p-3 rounded-xl cursor-pointer transition group ${activeTab === "hours" ? "bg-primary/10 text-primary font-bold" : "text-slate-600 hover:bg-slate-50 hover:text-primary"}`}
+              >
+                <Award
+                  size={20}
+                  className={`mr-4 ${activeTab === "hours" ? "text-primary" : "text-slate-400 group-hover:text-primary"}`}
+                />{" "}
+                輔導時數
+                {/* 進度小標籤 */}
+                {approvedHours > 0 && approvedHours < 100 && (
+                  <span className="ml-auto text-[10px] bg-slate-100 text-slate-500 font-bold px-2 py-0.5 rounded-full">
+                    {approvedHours.toFixed(0)}h
+                  </span>
+                )}
+                {approvedHours >= 100 && (
+                  <span className="ml-auto text-[10px] bg-green-100 text-green-600 font-bold px-2 py-0.5 rounded-full">
+                    達標 ✓
+                  </span>
+                )}
+              </li>
               <li
                 onClick={() => setActiveTab("reviews")}
                 className={`flex items-center p-3 rounded-xl cursor-pointer transition group ${activeTab === "reviews" ? "bg-primary/10 text-primary font-bold" : "text-slate-600 hover:bg-slate-50 hover:text-primary"}`}
@@ -1670,10 +2026,12 @@ function TutorDashboard() {
               ? renderMyStudent()
               : activeTab === "schedule"
                 ? renderSchedule()
-                : renderReviews()}
+                : activeTab === "hours"
+                  ? renderHours()
+                  : renderReviews()}
       </div>
 
-      {/* ✨ 編輯課程 Modal */}
+      {/* 編輯課程 Modal */}
       {editClassModal.isOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-fade-in">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden flex flex-col">
@@ -1773,7 +2131,7 @@ function TutorDashboard() {
         </div>
       )}
 
-      {/* ✨ 補簽到 Modal */}
+      {/* 補簽到 Modal */}
       {makeupModal.isOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
@@ -1844,7 +2202,7 @@ function TutorDashboard() {
         </div>
       )}
 
-      {/* ✨ 課堂紀錄 Modal */}
+      {/* 課堂紀錄 Modal */}
       {notesModal.isOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
@@ -1887,8 +2245,6 @@ function TutorDashboard() {
                 <X size={20} />
               </button>
             </div>
-
-            {/* ✅ form 包住所有欄位和按鈕 */}
             <form
               onSubmit={handleNotesSubmit}
               className="p-6 space-y-4 overflow-y-auto flex-grow"
@@ -2001,6 +2357,7 @@ function TutorDashboard() {
         </div>
       )}
 
+      {/* 異常回報 Modal */}
       {reportModal.isOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
@@ -2029,12 +2386,10 @@ function TutorDashboard() {
                 <X size={20} />
               </button>
             </div>
-
             <form
               onSubmit={handleReportSubmit}
               className="p-6 space-y-4 overflow-y-auto flex-grow"
             >
-              {/* 時間（唯讀） */}
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-1">
                   上課時間 Time
@@ -2044,8 +2399,6 @@ function TutorDashboard() {
                   {reportModal.endTime}
                 </div>
               </div>
-
-              {/* 回報類型 */}
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-1">
                   回報類型 Type <span className="text-red-500">*</span>
@@ -2071,8 +2424,6 @@ function TutorDashboard() {
                   <option value="other">其他 Other</option>
                 </select>
               </div>
-
-              {/* 地點 */}
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-1">
                   地點 Location
@@ -2087,8 +2438,6 @@ function TutorDashboard() {
                   className="w-full border border-slate-300 rounded-lg px-3 py-2 outline-none focus:border-primary text-sm"
                 />
               </div>
-
-              {/* 回報內容 */}
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-1">
                   回報內容 Content <span className="text-red-500">*</span>
@@ -2098,20 +2447,16 @@ function TutorDashboard() {
                   onChange={(e) =>
                     setReportForm({ ...reportForm, content: e.target.value })
                   }
-                  placeholder="請詳細描述發生的狀況... (Please describe the incident in detail)"
+                  placeholder="請詳細描述發生的狀況..."
                   required
                   rows={4}
                   className="w-full border border-slate-300 rounded-lg px-3 py-2 outline-none focus:border-primary text-sm resize-none"
                 />
               </div>
-
-              {/* 附件 */}
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-1">
                   附件 Attachment{" "}
-                  <span className="text-slate-400 font-normal">
-                    （選填 Optional）
-                  </span>
+                  <span className="text-slate-400 font-normal">（選填）</span>
                 </label>
                 <input
                   type="file"
@@ -2121,7 +2466,6 @@ function TutorDashboard() {
                   className="w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:font-bold file:bg-red-50 file:text-red-500 hover:file:bg-red-100"
                 />
               </div>
-
               <div className="flex gap-3 pt-2">
                 <button
                   type="button"

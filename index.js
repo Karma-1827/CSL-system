@@ -1317,3 +1317,246 @@ app.post("/api/admin/emergency-alerts/:id/read", async (req, res) => {
     res.status(500).json({ success: false });
   }
 });
+
+// 🚀 輔導時數查詢 API (GET)
+// 邏輯：tutor_signed_at + has_note(class_notes) → 視為「待審/通過」
+// 管理員在 hours_review 表中審查，status: 'pending' | 'approved' | 'rejected'
+app.get("/api/tutor/hours/:userId", async (req, res) => {
+  const { userId } = req.params;
+  try {
+    // 撈出所有「老師已簽到 + 老師已填紀錄」的課，並 left join 時數審查結果
+    const result = await pool.query(
+      `
+      SELECT
+        c.id            AS class_id,
+        c.class_date::text,
+        c.start_time,
+        c.end_time,
+        c.tutor_signed_at,
+        cn.id           AS note_id,
+        hr.id           AS review_id,
+        hr.status       AS review_status,   -- pending | approved | rejected | null
+        hr.reviewed_at,
+        EXTRACT(EPOCH FROM (
+          TO_TIMESTAMP(c.end_time::text, 'HH24:MI:SS') -
+          TO_TIMESTAMP(c.start_time::text, 'HH24:MI:SS')
+        )) / 3600.0     AS hours
+      FROM classes c
+      LEFT JOIN class_notes cn
+        ON cn.class_id = c.id AND cn.user_id = $1
+      LEFT JOIN hours_review hr
+        ON hr.class_id = c.id AND hr.tutor_id = $1
+      WHERE c.tutor_id = $1
+        AND c.status != 'cancelled'
+      ORDER BY c.class_date ASC, c.start_time ASC
+      `,
+      [userId],
+    );
+
+    // 計算已核准總時數
+    const approvedHours = result.rows
+      .filter((r) => r.review_status === "approved")
+      .reduce((sum, r) => sum + parseFloat(r.hours || 0), 0);
+
+    res.json({ success: true, data: result.rows, approvedHours });
+  } catch (error) {
+    console.error("查詢輔導時數失敗:", error);
+    res.status(500).json({ success: false, message: "伺服器發生錯誤" });
+  }
+});
+
+// 🚀 提交待審時數（老師主動送審，後端自動檢查簽到+紀錄）(POST)
+app.post("/api/tutor/hours/submit/:classId", async (req, res) => {
+  const { classId } = req.params;
+  const { userId } = req.body;
+  try {
+    // 確認簽到 + 紀錄都有
+    const classRes = await pool.query(
+      `SELECT c.tutor_signed_at,
+              (SELECT id FROM class_notes WHERE class_id = c.id AND user_id = $2) AS note_id
+       FROM classes c WHERE c.id = $1 AND c.tutor_id = $2`,
+      [classId, userId],
+    );
+    if (classRes.rows.length === 0)
+      return res.status(404).json({ success: false, message: "找不到課程" });
+
+    const cls = classRes.rows[0];
+    if (!cls.tutor_signed_at)
+      return res
+        .status(400)
+        .json({ success: false, message: "尚未完成簽到，無法送審" });
+    if (!cls.note_id)
+      return res
+        .status(400)
+        .json({ success: false, message: "尚未填寫課堂紀錄，無法送審" });
+
+    // 避免重複送審
+    const dupCheck = await pool.query(
+      "SELECT id FROM hours_review WHERE class_id = $1 AND tutor_id = $2",
+      [classId, userId],
+    );
+    if (dupCheck.rows.length > 0)
+      return res
+        .status(400)
+        .json({ success: false, message: "此堂課已送審，請等待管理員審查" });
+
+    await pool.query(
+      "INSERT INTO hours_review (class_id, tutor_id, status) VALUES ($1, $2, 'pending')",
+      [classId, userId],
+    );
+    res.json({ success: true, message: "✅ 已送出審查，請等待管理員確認" });
+  } catch (error) {
+    console.error("送審失敗:", error);
+    res.status(500).json({ success: false, message: "伺服器發生錯誤" });
+  }
+});
+
+// 🚀 申請實習時數證明 (POST)
+app.post("/api/tutor/apply-certificate", async (req, res) => {
+  const { userId } = req.body;
+  try {
+    // 確認累積時數 >= 100
+    const hoursRes = await pool.query(
+      `
+      SELECT COALESCE(SUM(
+        EXTRACT(EPOCH FROM (
+          TO_TIMESTAMP(c.end_time::text, 'HH24:MI:SS') -
+          TO_TIMESTAMP(c.start_time::text, 'HH24:MI:SS')
+        )) / 3600.0
+      ), 0) AS total_hours
+      FROM hours_review hr
+      JOIN classes c ON hr.class_id = c.id
+      WHERE hr.tutor_id = $1 AND hr.status = 'approved'
+      `,
+      [userId],
+    );
+    const totalHours = parseFloat(hoursRes.rows[0].total_hours);
+    if (totalHours < 100)
+      return res.status(400).json({
+        success: false,
+        message: `時數不足！目前僅累積 ${totalHours.toFixed(1)} 小時，需達 100 小時才可申請。`,
+      });
+
+    // 避免重複申請
+    const dupCheck = await pool.query(
+      "SELECT id FROM certificate_applications WHERE tutor_id = $1 AND status != 'rejected'",
+      [userId],
+    );
+    if (dupCheck.rows.length > 0)
+      return res.status(400).json({
+        success: false,
+        message: "您已有一筆申請中或已核發的證書申請",
+      });
+
+    await pool.query(
+      "INSERT INTO certificate_applications (tutor_id, status) VALUES ($1, 'pending')",
+      [userId],
+    );
+    res.json({
+      success: true,
+      message: "🎉 申請已送出！管理員審核後將通知您領取證書。",
+    });
+  } catch (error) {
+    console.error("申請證書失敗:", error);
+    res.status(500).json({ success: false, message: "伺服器發生錯誤" });
+  }
+});
+
+// 🚀 查詢證書申請狀態 (GET)
+app.get("/api/tutor/certificate-status/:userId", async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT status, created_at FROM certificate_applications WHERE tutor_id = $1 ORDER BY created_at DESC LIMIT 1",
+      [req.params.userId],
+    );
+    res.json({ success: true, data: result.rows[0] || null });
+  } catch (error) {
+    res.status(500).json({ success: false });
+  }
+});
+
+// 🚀 管理員：查詢所有時數審查 (GET)
+app.get("/api/admin/hours-review", async (req, res) => {
+  try {
+    const result = await pool.query(
+      `
+      SELECT
+        hr.id, hr.class_id, hr.tutor_id, hr.status, hr.reviewed_at, hr.created_at,
+        u.chinese_name, u.english_name, u.student_id,
+        c.class_date::text, c.start_time, c.end_time,
+        EXTRACT(EPOCH FROM (
+          TO_TIMESTAMP(c.end_time::text, 'HH24:MI:SS') -
+          TO_TIMESTAMP(c.start_time::text, 'HH24:MI:SS')
+        )) / 3600.0 AS hours
+      FROM hours_review hr
+      JOIN users u ON hr.tutor_id = u.id
+      JOIN classes c ON hr.class_id = c.id
+      ORDER BY hr.created_at DESC
+      `,
+    );
+    res.json({ success: true, data: result.rows });
+  } catch (error) {
+    res.status(500).json({ success: false });
+  }
+});
+
+// 🚀 管理員：審查時數 (POST)
+app.post("/api/admin/hours-review/:id/review", async (req, res) => {
+  const { action } = req.body; // 'approved' | 'rejected'
+  try {
+    await pool.query(
+      "UPDATE hours_review SET status = $1, reviewed_at = NOW() WHERE id = $2",
+      [action, req.params.id],
+    );
+    res.json({
+      success: true,
+      message: action === "approved" ? "✅ 已核准此堂時數" : "❌ 已駁回",
+    });
+  } catch (error) {
+    res.status(500).json({ success: false });
+  }
+});
+
+// 🚀 管理員：查詢所有證書申請 (GET)
+app.get("/api/admin/certificate-applications", async (req, res) => {
+  try {
+    const result = await pool.query(
+      `
+      SELECT ca.id, ca.tutor_id, ca.status, ca.created_at,
+             u.chinese_name, u.english_name, u.student_id,
+             COALESCE((
+               SELECT SUM(EXTRACT(EPOCH FROM (
+                 TO_TIMESTAMP(c.end_time::text, 'HH24:MI:SS') -
+                 TO_TIMESTAMP(c.start_time::text, 'HH24:MI:SS')
+               )) / 3600.0)
+               FROM hours_review hr
+               JOIN classes c ON hr.class_id = c.id
+               WHERE hr.tutor_id = ca.tutor_id AND hr.status = 'approved'
+             ), 0) AS approved_hours
+      FROM certificate_applications ca
+      JOIN users u ON ca.tutor_id = u.id
+      ORDER BY ca.created_at DESC
+      `,
+    );
+    res.json({ success: true, data: result.rows });
+  } catch (error) {
+    res.status(500).json({ success: false });
+  }
+});
+
+// 🚀 管理員：更新證書申請狀態 (POST)
+app.post("/api/admin/certificate-applications/:id/review", async (req, res) => {
+  const { action } = req.body; // 'issued' | 'rejected'
+  try {
+    await pool.query(
+      "UPDATE certificate_applications SET status = $1, reviewed_at = NOW() WHERE id = $2",
+      [action, req.params.id],
+    );
+    res.json({
+      success: true,
+      message: action === "issued" ? "✅ 已核發證書" : "❌ 已駁回申請",
+    });
+  } catch (error) {
+    res.status(500).json({ success: false });
+  }
+});
