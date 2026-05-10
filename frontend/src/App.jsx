@@ -18,6 +18,11 @@ function App() {
   const [regStudentId, setRegStudentId] = useState('');
   // ✨ 新增：預設註冊身份為本系學生 (tutor)
   const [regRole, setRegRole] = useState('tutor');
+  const [isForgotMode, setIsForgotMode] = useState(false);
+  const [forgotAccount, setForgotAccount] = useState('');
+  const [forgotStudentId, setForgotStudentId] = useState('');
+  const [forgotNewPassword, setForgotNewPassword] = useState('');
+  const [forgotConfirmPassword, setForgotConfirmPassword] = useState('');
 
   // ✨ 新增 3：啟動導航器
   const navigate = useNavigate(); 
@@ -103,6 +108,110 @@ function App() {
     }
   };
 
+  const handleResetPassword = async (e) => {
+    e.preventDefault();
+    if (forgotNewPassword !== forgotConfirmPassword) {
+      return alert('兩次輸入的密碼不一致！');
+    }
+    if (forgotNewPassword.length < 6) {
+      return alert('密碼至少需要 6 個字元');
+    }
+    try {
+      const response = await fetch('http://localhost:3001/api/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          account: forgotAccount,
+          studentId: forgotStudentId,
+          newPassword: forgotNewPassword,
+        }),
+      });
+      const result = await response.json();
+      if (result.success) {
+        alert('✅ ' + result.message);
+        setIsForgotMode(false);
+        setForgotAccount('');
+        setForgotStudentId('');
+        setForgotNewPassword('');
+        setForgotConfirmPassword('');
+      } else {
+        alert('❌ ' + result.message);
+      }
+    } catch (error) {
+      alert('無法連線到伺服器！');
+    }
+  };
+
+  const ForgotPasswordScreen = (
+  <div className="min-h-screen flex flex-col bg-slate-50 font-sans">
+    <header className="bg-white shadow-sm px-6 py-4 flex justify-between items-center z-10">
+      <img src={logoImg} alt="Logo" className="h-12 w-auto object-contain" />
+    </header>
+
+    <main className="flex-grow flex items-center justify-center p-6">
+      <div className="w-full max-w-md bg-white p-10 rounded-xl shadow-lg">
+        <button
+          onClick={() => setIsForgotMode(false)}
+          className="text-sm text-primary hover:underline mb-6 flex items-center"
+        >
+          ← 返回登入
+        </button>
+        <h2 className="text-2xl font-bold text-center text-slate-800 mb-2">重設密碼</h2>
+        <p className="text-sm text-slate-500 text-center mb-8">請輸入您的帳號與學號以驗證身份</p>
+
+        <form className="space-y-4" onSubmit={handleResetPassword}>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">使用者名稱（帳號）</label>
+            <input
+              type="text" value={forgotAccount}
+              onChange={(e) => setForgotAccount(e.target.value)}
+              placeholder="請輸入登入帳號" required
+              className="w-full border border-gray-300 rounded-md px-4 py-2 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">學號</label>
+            <input
+              type="text" value={forgotStudentId}
+              onChange={(e) => setForgotStudentId(e.target.value)}
+              placeholder="例如：B10902000" required
+              className="w-full border border-gray-300 rounded-md px-4 py-2 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">新密碼</label>
+            <input
+              type="password" value={forgotNewPassword}
+              onChange={(e) => setForgotNewPassword(e.target.value)}
+              placeholder="請輸入新密碼（至少6碼）" required
+              className="w-full border border-gray-300 rounded-md px-4 py-2 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">確認新密碼</label>
+            <input
+              type="password" value={forgotConfirmPassword}
+              onChange={(e) => setForgotConfirmPassword(e.target.value)}
+              placeholder="再輸入一次新密碼" required
+              className="w-full border border-gray-300 rounded-md px-4 py-2 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition"
+            />
+          </div>
+          <button
+            type="submit"
+            className="w-full bg-primary text-white font-bold py-2.5 rounded-md mt-4 hover:bg-primary-dark transition duration-200 shadow-md"
+          >
+            確認重設密碼
+          </button>
+        </form>
+      </div>
+    </main>
+
+    <footer className="bg-white border-t border-gray-200 py-4 px-6 flex justify-between items-center text-sm text-gray-500">
+      <div>© 2026 華語系 保留所有權利。</div>
+    </footer>
+  </div>
+);
+
   // --- 將原本的登入畫面包裝成一個獨立區塊 ---
   const LoginScreen = (
     <div className="min-h-screen flex flex-col bg-slate-50 font-sans">
@@ -164,7 +273,7 @@ function App() {
                   {isLoginMode && (
                     <button 
                       type="button" 
-                      onClick={() => alert('系統發信功能目前建置中 🚧 \n如果忘記密碼，請帶著您的學生證至「華語文教學系辦公室」請管理員協助重設。')}
+                      onClick={() => setIsForgotMode(true)}                      
                       className="text-xs text-primary font-medium hover:underline focus:outline-none"
                     >
                       忘記密碼？
@@ -203,7 +312,7 @@ function App() {
   // ✨ 修改：定義網址對應的畫面
   return (
     <Routes>
-      <Route path="/" element={LoginScreen} /> 
+      <Route path="/" element={isForgotMode ? ForgotPasswordScreen : LoginScreen} /> 
       {/* 依照身分給予不同的網址與畫面 */}
       <Route path="/tutor-dashboard" element={<TutorDashboard />} />
       <Route path="/tutee-dashboard" element={<TuteeDashboard />} /> 

@@ -1,186 +1,183 @@
-require('dotenv').config(); // 載入 .env 裡面的環境變數
-const express = require('express');
-const cors = require('cors');
-const { Pool } = require('pg'); // 載入 PostgreSQL 連線池
+require("dotenv").config();
+const express = require("express");
+const cors = require("cors");
+const { Pool } = require("pg");
+const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
+const multer = require("multer");
+const path = require("path");
+const fs = require("fs");
 
-// ✨ 新增這兩行：引入密碼加密與 JWT 套件
-const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
-
-// ✨ 新增這三行：處理檔案上
-const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
-
-// 🔑 關鍵：必須先有這行創造出 app！
-const app = express(); 
+const app = express();
 app.use(cors());
 app.use(express.json());
 
-// ✨ 新增：確認 uploads 資料夾是否存在，沒有就自動建立
-if (!fs.existsSync('./uploads')) {
-  fs.mkdirSync('./uploads');
+if (!fs.existsSync("./uploads")) {
+  fs.mkdirSync("./uploads");
 }
 
-// ✨ 新增：設定 Multer 搬運工的規則（存去哪、檔名怎麼取）
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
-    cb(null, 'uploads/'); // 存到 uploads 資料夾
+    cb(null, "uploads/");
   },
   filename: function (req, file, cb) {
-    // 為了避免檔名重複或中文檔名亂碼，我們在檔名加上「當下時間」
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, uniqueSuffix + '-' + Buffer.from(file.originalname, 'latin1').toString('utf8'));
-  }
+    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    cb(
+      null,
+      uniqueSuffix +
+        "-" +
+        Buffer.from(file.originalname, "latin1").toString("utf8"),
+    );
+  },
 });
 const upload = multer({ storage: storage });
 
-// ✨ 新增這行：讓前端可以直接透過網址讀取 uploads 資料夾裡的圖片/檔案
-app.use('/uploads', express.static('uploads'));
+app.use("/uploads", express.static("uploads"));
 
-// ✨ 新增這行：JWT 的加密密鑰（實務上會放在 .env 裡，這裡我們先寫死做測試）
-const JWT_SECRET = process.env.JWT_SECRET || 'csl_super_secret_key_2026';
+const JWT_SECRET = process.env.JWT_SECRET || "csl_super_secret_key_2026";
 
-// 建立資料庫連線設定
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
 });
 
-// 🚀 你的第一支 API：用 GET 方法取得所有使用者
-app.get('/api/users', async (req, res) => {
-  try {
-    // 讓程式去資料庫執行 SQL 語法
-    const result = await pool.query('SELECT * FROM users');
-    
-    // 把撈到的資料用 JSON 格式回傳給前端
-    res.json({
-      success: true,
-      message: '成功連線！這是你的資料：',
-      data: result.rows 
-    });
-  } catch (error) {
-    console.error('資料庫查詢錯誤:', error);
-    res.status(500).json({ success: false, message: '伺服器發生錯誤' });
-  }
-});
+// ✅ 工具函式：統一把 class_date 轉成純字串 "YYYY-MM-DD"
+const getDateStr = (classDate) => {
+  if (typeof classDate === "string") return classDate.split("T")[0];
+  if (classDate instanceof Date) return classDate.toISOString().split("T")[0];
+  return String(classDate).split("T")[0];
+};
 
-// 啟動伺服器
 const PORT = 3001;
 app.listen(PORT, () => {
-  console.log(`🎉 伺服器已成功啟動！請在瀏覽器打開： http://localhost:${PORT}/api/users`);
+  console.log(
+    `🎉 伺服器已成功啟動！請在瀏覽器打開： http://localhost:${PORT}/api/users`,
+  );
 });
 
-// 🚀 你的第二支 API：處理登入驗證 (POST)
-app.post('/api/login', async (req, res) => {
-  const { account, password } = req.body;
-
+// 🚀 第一支 API：取得所有使用者 (GET)
+app.get("/api/users", async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM users WHERE account = $1', [account]);
-    
-    if (result.rows.length === 0) {
-      return res.status(401).json({ success: false, message: '找不到此帳號，請確認是否輸入正確' });
-    }
+    const result = await pool.query("SELECT * FROM users");
+    res.json({
+      success: true,
+      message: "成功連線！這是你的資料：",
+      data: result.rows,
+    });
+  } catch (error) {
+    console.error("資料庫查詢錯誤:", error);
+    res.status(500).json({ success: false, message: "伺服器發生錯誤" });
+  }
+});
+
+// 🚀 第二支 API：登入驗證 (POST)
+app.post("/api/login", async (req, res) => {
+  const { account, password } = req.body;
+  try {
+    const result = await pool.query("SELECT * FROM users WHERE account = $1", [
+      account,
+    ]);
+    if (result.rows.length === 0)
+      return res
+        .status(401)
+        .json({ success: false, message: "找不到此帳號，請確認是否輸入正確" });
 
     const user = result.rows[0];
-
-    // ✨✨ 核心升級：用 bcrypt.compare 來比對「明文密碼」與資料庫裡的「亂碼密碼」
     const isMatch = await bcrypt.compare(password, user.password);
-    
-    if (!isMatch) {
-      return res.status(401).json({ success: false, message: '密碼錯誤' });
-    }
+    if (!isMatch)
+      return res.status(401).json({ success: false, message: "密碼錯誤" });
 
-    // ✨✨ 核心升級：密碼正確，核發 JWT 加密通行證 (Token)！
     const token = jwt.sign(
-      { id: user.id, account: user.account, role: user.role }, // 包進通行證裡的資訊
-      JWT_SECRET, 
-      { expiresIn: '1d' } // 通行證有效期限：1 天
+      { id: user.id, account: user.account, role: user.role },
+      JWT_SECRET,
+      { expiresIn: "1d" },
     );
 
-    // 回傳給前端時，把 token 一併交給它
-    res.json({ 
-      success: true, 
-      message: '登入成功！', 
-      data: { 
-        name: user.chinese_name, 
-        role: user.role,
-        token: token // 👈 把通行證給前端
-      } 
+    res.json({
+      success: true,
+      message: "登入成功！",
+      data: { name: user.chinese_name, role: user.role, token },
     });
-
   } catch (error) {
-    console.error('登入發生錯誤:', error);
-    res.status(500).json({ success: false, message: '伺服器發生錯誤' });
+    console.error("登入發生錯誤:", error);
+    res.status(500).json({ success: false, message: "伺服器發生錯誤" });
   }
 });
 
-// 🚀 第三支 API：處理新使用者註冊 (POST)
-app.post('/api/register', async (req, res) => {
+// 🚀 第三支 API：新使用者註冊 (POST)
+app.post("/api/register", async (req, res) => {
   const { account, password, email, studentId, role } = req.body;
-
-  if (!account || !password || !email || !studentId || !role) {
-    return res.status(400).json({ success: false, message: '所有欄位（包含身份）都必須填寫喔！' });
-  }
+  if (!account || !password || !email || !studentId || !role)
+    return res
+      .status(400)
+      .json({ success: false, message: "所有欄位（包含身份）都必須填寫喔！" });
 
   try {
     const checkExist = await pool.query(
-      'SELECT * FROM users WHERE account = $1 OR email = $2 OR student_id = $3',
-      [account, email, studentId]
+      "SELECT * FROM users WHERE account = $1 OR email = $2 OR student_id = $3",
+      [account, email, studentId],
+    );
+    if (checkExist.rows.length > 0)
+      return res.status(400).json({
+        success: false,
+        message: "這個帳號、信箱或學號已經被註冊過囉！",
+      });
+
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(password, salt);
+
+    await pool.query(
+      `INSERT INTO users (account, password, email, student_id, role, chinese_name) VALUES ($1, $2, $3, $4, $5, $6)`,
+      [account, hashedPassword, email, studentId, role, ""],
     );
 
-    if (checkExist.rows.length > 0) {
-      return res.status(400).json({ success: false, message: '這個帳號、信箱或學號已經被註冊過囉！' });
-    }
-
-    // ✨✨ 核心升級：將密碼加密！
-    const salt = await bcrypt.genSalt(10); // 產生隨機鹽把
-    const hashedPassword = await bcrypt.hash(password, salt); // 混合密碼並加密
-
-    // ✨ 修改：寫入資料庫時，把原本的 password 換成 hashedPassword
-    const result = await pool.query(
-      `INSERT INTO users (account, password, email, student_id, role, chinese_name) 
-       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-      [account, hashedPassword, email, studentId, role, ''] 
-    );
-
-    res.json({ success: true, message: '🎉 註冊成功！', data: { role: role } });
-
+    res.json({ success: true, message: "🎉 註冊成功！", data: { role } });
   } catch (error) {
-    console.error('註冊發生錯誤:', error);
-    res.status(500).json({ success: false, message: '伺服器發生錯誤' });
+    console.error("註冊發生錯誤:", error);
+    res.status(500).json({ success: false, message: "伺服器發生錯誤" });
   }
 });
 
-// 🚀 第四支 API：儲存外籍生的專屬輔導檔案 (POST)
-app.post('/api/tutee-profile', async (req, res) => {
+// 🚀 第四支 API：儲存外籍生檔案 (POST)
+app.post("/api/tutee-profile", async (req, res) => {
   const {
-    originalStudentId, // ✨ 新增：接收前端偷偷傳來的「舊學號」
-    studentId,         // 這是畫面上可能被使用者修改過的「新學號」
-    studentType, chineseName, englishName, program,
-    nationality, department, phone, overallLevel, levelListening,
-    levelSpeaking, levelReading, levelWriting, targetSkills, 
-    skillsToImprove, preferredTimeSlots,
-    learningDuration
+    originalStudentId,
+    studentId,
+    studentType,
+    chineseName,
+    englishName,
+    program,
+    nationality,
+    department,
+    phone,
+    overallLevel,
+    levelListening,
+    levelSpeaking,
+    levelReading,
+    levelWriting,
+    targetSkills,
+    skillsToImprove,
+    preferredTimeSlots,
+    learningDuration,
   } = req.body;
 
   try {
-    // 🔑 關鍵 1：用「舊學號」去 users 表找人！
     const searchId = originalStudentId || studentId;
-    const userResult = await pool.query('SELECT id FROM users WHERE student_id = $1', [searchId]);
-
-    if (userResult.rows.length === 0) {
-      return res.status(400).json({ success: false, message: '找不到此學號，請確認是否與註冊時輸入的一致！' });
-    }
+    const userResult = await pool.query(
+      "SELECT id FROM users WHERE student_id = $1",
+      [searchId],
+    );
+    if (userResult.rows.length === 0)
+      return res.status(400).json({
+        success: false,
+        message: "找不到此學號，請確認是否與註冊時輸入的一致！",
+      });
 
     const userId = userResult.rows[0].id;
-
-    // 🔑 關鍵 2：更新 users 表時，順便把學號 (student_id) 也「覆蓋」成最新的！
     await pool.query(
-      'UPDATE users SET student_id = $1, chinese_name = $2, english_name = $3 WHERE id = $4', 
-      [studentId, chineseName, englishName, userId]
+      "UPDATE users SET student_id = $1, chinese_name = $2, english_name = $3 WHERE id = $4",
+      [studentId, chineseName, englishName, userId],
     );
 
-    // 🔑 關鍵 3：寫入 tutee_profiles (維持不變)
     await pool.query(
       `INSERT INTO tutee_profiles 
       (user_id, enrollment_status, nationality, department, program, phone, 
@@ -188,47 +185,54 @@ app.post('/api/tutee-profile', async (req, res) => {
        target_skills, skills_to_improve, available_times, learning_duration) 
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
       [
-        userId, studentType, nationality, department, program, phone,
-        overallLevel, levelListening, levelSpeaking, levelReading, levelWriting, 
-        JSON.stringify(targetSkills), skillsToImprove, JSON.stringify(preferredTimeSlots),
-        learningDuration
-      ]
+        userId,
+        studentType,
+        nationality,
+        department,
+        program,
+        phone,
+        overallLevel,
+        levelListening,
+        levelSpeaking,
+        levelReading,
+        levelWriting,
+        JSON.stringify(targetSkills),
+        skillsToImprove,
+        JSON.stringify(preferredTimeSlots),
+        learningDuration,
+      ],
     );
 
-    res.json({ success: true, message: '輔導資料建立成功！' });
-
+    res.json({ success: true, message: "輔導資料建立成功！" });
   } catch (error) {
-    console.error('儲存個人資料失敗:', error);
-    res.status(500).json({ success: false, message: '伺服器發生錯誤，請看後端終端機' });
+    console.error("儲存個人資料失敗:", error);
+    res
+      .status(500)
+      .json({ success: false, message: "伺服器發生錯誤，請看後端終端機" });
   }
 });
 
 // 🚀 第五支 API：根據帳號獲取使用者基本資訊 (GET)
-app.get('/api/user/:account', async (req, res) => {
+app.get("/api/user/:account", async (req, res) => {
   try {
-    const { account } = req.params;
     const result = await pool.query(
-      'SELECT chinese_name, english_name, student_id, role FROM users WHERE account = $1', 
-      [account]
+      "SELECT chinese_name, english_name, student_id, role FROM users WHERE account = $1",
+      [req.params.account],
     );
-
     if (result.rows.length > 0) {
       res.json({ success: true, data: result.rows[0] });
     } else {
-      res.status(404).json({ success: false, message: '找不到使用者' });
+      res.status(404).json({ success: false, message: "找不到使用者" });
     }
   } catch (error) {
-    console.error('獲取使用者資訊失敗:', error);
-    res.status(500).json({ success: false, message: '伺服器發生錯誤' });
+    console.error("獲取使用者資訊失敗:", error);
+    res.status(500).json({ success: false, message: "伺服器發生錯誤" });
   }
 });
 
-// 🚀 第六支 API：獲取使用者「完整」的個人與輔導/教學資訊 (GET)
-app.get('/api/profile/:account', async (req, res) => {
+// 🚀 第六支 API：獲取使用者完整個人資訊 (GET)
+app.get("/api/profile/:account", async (req, res) => {
   try {
-    const { account } = req.params;
-    
-    // ✨ 終極合併語法：同時去外籍生 (p) 和小老師 (t) 表格撈資料
     const result = await pool.query(
       `SELECT 
         u.id as user_id,
@@ -237,92 +241,108 @@ app.get('/api/profile/:account', async (req, res) => {
         COALESCE(p.department, t.department) as department,
         COALESCE(p.phone, t.phone) as phone,
         COALESCE(p.nationality, t.nationality) as nationality,
-        p.overall_level,
-        p.learning_duration,
+        p.overall_level, p.learning_duration,
         COALESCE(p.level_listening, t.level_listening) as level_listening,
         COALESCE(p.level_speaking, t.level_speaking) as level_speaking,
         COALESCE(p.level_reading, t.level_reading) as level_reading,
         COALESCE(p.level_writing, t.level_writing) as level_writing,
-        p.target_skills,
-        p.skills_to_improve,
+        p.target_skills, p.skills_to_improve,
         COALESCE(p.available_times, t.available_times) as available_times,
-        t.teaching_notes,
-        t.certification_file,
-        t.certification_status
+        t.teaching_notes, t.certification_file, t.certification_status
        FROM users u
        LEFT JOIN tutee_profiles p ON u.id = p.user_id
        LEFT JOIN tutor_profiles t ON u.id = t.user_id
-       WHERE u.account = $1`, 
-      [account]
+       WHERE u.account = $1`,
+      [req.params.account],
     );
 
     if (result.rows.length > 0) {
       res.json({ success: true, data: result.rows[0] });
     } else {
-      res.status(404).json({ success: false, message: '找不到使用者' });
+      res.status(404).json({ success: false, message: "找不到使用者" });
     }
   } catch (error) {
-    console.error('獲取完整個人資訊失敗:', error);
-    res.status(500).json({ success: false, message: '伺服器發生錯誤' });
+    console.error("獲取完整個人資訊失敗:", error);
+    res.status(500).json({ success: false, message: "伺服器發生錯誤" });
   }
 });
 
-// 🚀 第七支 API：儲存小老師的專屬檔案與「實體證書」 (POST)
-// ✨ 注意這裡多了一個 upload.single('certificationFile')
-app.post('/api/tutor-profile', upload.single('certificationFile'), async (req, res) => {
-  // 當使用了 FormData，純文字資料會在 req.body，檔案會在 req.file
-  const {
-    studentId, chineseName, englishName, studentStatus, program,
-    nationality, department, phone, 
-    levelListening, levelSpeaking, levelReading, levelWriting, teachingNotes,
-    availableTimes // 👈 這裡現在是一串字串，等一下要轉回陣列
-  } = req.body;
+// 🚀 第七支 API：儲存小老師檔案 (POST)
+app.post(
+  "/api/tutor-profile",
+  upload.single("certificationFile"),
+  async (req, res) => {
+    const {
+      studentId,
+      chineseName,
+      englishName,
+      studentStatus,
+      program,
+      nationality,
+      department,
+      phone,
+      levelListening,
+      levelSpeaking,
+      levelReading,
+      levelWriting,
+      teachingNotes,
+      availableTimes,
+    } = req.body;
+    const certificationFileName = req.file ? req.file.filename : null;
 
-  // ✨ 取得剛存好的檔案名稱（如果有上傳的話）
-  const certificationFileName = req.file ? req.file.filename : null;
+    try {
+      const userResult = await pool.query(
+        "SELECT id FROM users WHERE student_id = $1",
+        [studentId],
+      );
+      if (userResult.rows.length === 0)
+        return res.status(400).json({
+          success: false,
+          message: "找不到此學號，請確認是否與註冊時一致！",
+        });
 
-  try {
-    const userResult = await pool.query('SELECT id FROM users WHERE student_id = $1', [studentId]);
-    if (userResult.rows.length === 0) {
-      return res.status(400).json({ success: false, message: '找不到此學號，請確認是否與註冊時一致！' });
-    }
-    const userId = userResult.rows[0].id;
+      const userId = userResult.rows[0].id;
+      await pool.query(
+        "UPDATE users SET chinese_name = $1, english_name = $2 WHERE id = $3",
+        [chineseName, englishName, userId],
+      );
 
-    await pool.query(
-      'UPDATE users SET chinese_name = $1, english_name = $2 WHERE id = $3', 
-      [chineseName, englishName, userId]
-    );
-
-    // ✨ 寫入資料庫：多存一個 certificationFileName，並記得解析 availableTimes
-    await pool.query(
-      `INSERT INTO tutor_profiles 
+      await pool.query(
+        `INSERT INTO tutor_profiles 
       (user_id, student_status, program, nationality, department, phone, 
        level_listening, level_speaking, level_reading, level_writing, teaching_notes, available_times, certification_file) 
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
-      [
-        userId, studentStatus, program, nationality, department, phone, 
-        levelListening, levelSpeaking, levelReading, levelWriting, teachingNotes, 
-        availableTimes, // 這裡前端等一下會幫我們 stringify 好
-        certificationFileName // 👈 把真正的檔名存進資料庫
-      ]
-    );
+        [
+          userId,
+          studentStatus,
+          program,
+          nationality,
+          department,
+          phone,
+          levelListening,
+          levelSpeaking,
+          levelReading,
+          levelWriting,
+          teachingNotes,
+          availableTimes,
+          certificationFileName,
+        ],
+      );
 
-    res.json({ success: true, message: '小老師資料與檔案建立成功！' });
-  } catch (error) {
-    console.error('儲存小老師資料失敗:', error);
-    res.status(500).json({ success: false, message: '伺服器發生錯誤' });
-  }
-});
+      res.json({ success: true, message: "小老師資料與檔案建立成功！" });
+    } catch (error) {
+      console.error("儲存小老師資料失敗:", error);
+      res.status(500).json({ success: false, message: "伺服器發生錯誤" });
+    }
+  },
+);
 
-
-// 🚀 第八支 API：管理員專用，獲取所有小老師或外籍生清單與詳細資料 (GET)
-app.get('/api/admin/users/:role', async (req, res) => {
+// 🚀 第八支 API：管理員獲取所有學生清單 (GET)
+app.get("/api/admin/users/:role", async (req, res) => {
   try {
-    const { role } = req.params; // 'tutor' 或 'tutee'
-    let query = '';
-
-    if (role === 'tutor') {
-      // 撈取小老師
+    const { role } = req.params;
+    let query = "";
+    if (role === "tutor") {
       query = `SELECT u.account, u.chinese_name, u.english_name, u.student_id, u.email,
                t.department, t.phone, t.nationality, t.student_status, t.program, 
                t.level_listening, t.level_speaking, t.level_reading, t.level_writing, 
@@ -330,8 +350,7 @@ app.get('/api/admin/users/:role', async (req, res) => {
                FROM users u 
                LEFT JOIN tutor_profiles t ON u.id = t.user_id 
                WHERE u.role = 'tutor'`;
-    } else if (role === 'tutee') {
-      // 撈取外籍生
+    } else if (role === "tutee") {
       query = `SELECT u.account, u.chinese_name, u.english_name, u.student_id, u.email,
                p.department, p.phone, p.nationality, p.overall_level, 
                p.target_skills, p.skills_to_improve
@@ -339,50 +358,50 @@ app.get('/api/admin/users/:role', async (req, res) => {
                LEFT JOIN tutee_profiles p ON u.id = p.user_id 
                WHERE u.role = 'tutee'`;
     } else {
-      return res.status(400).json({ success: false, message: '身分參數錯誤' });
+      return res.status(400).json({ success: false, message: "身分參數錯誤" });
     }
-
     const result = await pool.query(query);
     res.json({ success: true, data: result.rows });
   } catch (error) {
-    console.error('獲取用戶清單失敗:', error);
-    res.status(500).json({ success: false, message: '伺服器發生錯誤' });
+    console.error("獲取用戶清單失敗:", error);
+    res.status(500).json({ success: false, message: "伺服器發生錯誤" });
   }
 });
 
-// 🚨 臨時工具：一鍵幫管理員重設並加密密碼
-app.get('/api/setup-admin', async (req, res) => {
+// 🚀 臨時工具：重設管理員密碼
+app.get("/api/setup-admin", async (req, res) => {
   try {
-    // 1. 產生一組加密過的新密碼（這裡預設新密碼為 'admin123'）
     const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash('admin123', salt);
-    
-    // 2. 去資料庫把身分為 admin，或者帳號叫做 admin 的密碼更新掉
+    const hashedPassword = await bcrypt.hash("admin123", salt);
     const result = await pool.query(
       "UPDATE users SET password = $1 WHERE role = 'admin' OR account = 'admin' RETURNING account",
-      [hashedPassword]
+      [hashedPassword],
     );
-
     if (result.rows.length > 0) {
-      res.send(`<h1>🎉 成功！</h1><p>管理員 (${result.rows[0].account}) 的密碼已經成功加密並重設為：<b>admin123</b></p><p>現在可以回首頁登入了！</p>`);
+      res.send(
+        `<h1>🎉 成功！</h1><p>管理員 (${result.rows[0].account}) 的密碼已重設為：<b>admin123</b></p>`,
+      );
     } else {
-      res.send('找不到 admin 帳號，請去 TablePlus 確認你的管理員帳號 (account) 叫什麼名字。');
+      res.send("找不到 admin 帳號");
     }
   } catch (error) {
-    res.send('發生錯誤：' + error.message);
+    res.send("發生錯誤：" + error.message);
   }
 });
 
-// 🚀 第九支 API：管理員送出審查結果 (通過 / 補件) (POST)
-app.post('/api/admin/review-cert', async (req, res) => {
-  const { studentId, status } = req.body; // status 會是 'approved' 或 'resubmit'
+// 🚀 第九支 API：管理員送出審查結果 (POST)
+app.post("/api/admin/review-cert", async (req, res) => {
+  const { studentId, status } = req.body;
   try {
-    const userRes = await pool.query('SELECT id FROM users WHERE student_id = $1', [studentId]);
-    if (userRes.rows.length === 0) return res.status(400).json({ success: false });
-    
+    const userRes = await pool.query(
+      "SELECT id FROM users WHERE student_id = $1",
+      [studentId],
+    );
+    if (userRes.rows.length === 0)
+      return res.status(400).json({ success: false });
     await pool.query(
       "UPDATE tutor_profiles SET certification_status = $1 WHERE user_id = $2",
-      [status, userRes.rows[0].id]
+      [status, userRes.rows[0].id],
     );
     res.json({ success: true });
   } catch (error) {
@@ -391,30 +410,35 @@ app.post('/api/admin/review-cert', async (req, res) => {
   }
 });
 
-// 🚀 第十支 API：小老師重新上傳(補件)證書 (POST)
-app.post('/api/tutor/reupload-cert', upload.single('certificationFile'), async (req, res) => {
-  const { account } = req.body;
-  const filename = req.file ? req.file.filename : null;
-  
-  if (!filename) return res.status(400).json({ success: false, message: '沒有收到檔案' });
-  
-  try {
-    const userRes = await pool.query('SELECT id FROM users WHERE account = $1', [account]);
-    // ✨ 魔法：更新檔案，並把狀態自動改回 'pending' (未審查)，讓管理員可以再次看到！
-    await pool.query(
-      "UPDATE tutor_profiles SET certification_file = $1, certification_status = 'pending' WHERE user_id = $2",
-      [filename, userRes.rows[0].id]
-    );
-    res.json({ success: true, filename });
-  } catch (error) {
-    res.status(500).json({ success: false });
-  }
-});
+// 🚀 第十支 API：小老師補件上傳 (POST)
+app.post(
+  "/api/tutor/reupload-cert",
+  upload.single("certificationFile"),
+  async (req, res) => {
+    const { account } = req.body;
+    const filename = req.file ? req.file.filename : null;
+    if (!filename)
+      return res.status(400).json({ success: false, message: "沒有收到檔案" });
 
-// 🚀 第十一支 API：小老師專用 - 尋找外籍生 (GET)
-app.get('/api/match/tutees', async (req, res) => {
+    try {
+      const userRes = await pool.query(
+        "SELECT id FROM users WHERE account = $1",
+        [account],
+      );
+      await pool.query(
+        "UPDATE tutor_profiles SET certification_file = $1, certification_status = 'pending' WHERE user_id = $2",
+        [filename, userRes.rows[0].id],
+      );
+      res.json({ success: true, filename });
+    } catch (error) {
+      res.status(500).json({ success: false });
+    }
+  },
+);
+
+// 🚀 第十一支 API：尋找外籍生 (GET)
+app.get("/api/match/tutees", async (req, res) => {
   try {
-    // 撈取所有外籍生，並透過 LEFT JOIN 檢查他們在 match_requests 表裡的狀態
     const query = `
       SELECT 
         u.id as tutee_user_id, u.student_id, u.chinese_name, u.english_name,
@@ -429,50 +453,60 @@ app.get('/api/match/tutees', async (req, res) => {
     const result = await pool.query(query);
     res.json({ success: true, data: result.rows });
   } catch (error) {
-    console.error('獲取外籍生列表失敗:', error);
+    console.error("獲取外籍生列表失敗:", error);
     res.status(500).json({ success: false });
   }
 });
 
-// 🚀 第十二支 API：小老師對外籍生「發送邀請」 (POST)
-app.post('/api/match/request', async (req, res) => {
+// 🚀 第十二支 API：發送邀請 (POST)
+app.post("/api/match/request", async (req, res) => {
   const { tutorAccount, tuteeUserId } = req.body;
   try {
-    // 1. 先找出這位小老師的 user_id
-    const tutorRes = await pool.query('SELECT id FROM users WHERE account = $1', [tutorAccount]);
-    if (tutorRes.rows.length === 0) return res.status(400).json({ success: false, message: '找不到小老師' });
+    const tutorRes = await pool.query(
+      "SELECT id FROM users WHERE account = $1",
+      [tutorAccount],
+    );
+    if (tutorRes.rows.length === 0)
+      return res.status(400).json({ success: false, message: "找不到小老師" });
     const tutorId = tutorRes.rows[0].id;
 
-    // 2. 檢查是否已經有人搶先一步發出邀請了 (避免重複發送)
     const checkRes = await pool.query(
-      "SELECT id FROM match_requests WHERE tutee_id = $1 AND status IN ('pending', 'accepted')", 
-      [tuteeUserId]
+      "SELECT id FROM match_requests WHERE tutee_id = $1 AND status IN ('pending', 'accepted')",
+      [tuteeUserId],
     );
-    if (checkRes.rows.length > 0) return res.status(400).json({ success: false, message: '手腳太慢啦！這位學生剛被其他人邀請或配對了。' });
+    if (checkRes.rows.length > 0)
+      return res.status(400).json({
+        success: false,
+        message: "手腳太慢啦！這位學生剛被其他人邀請或配對了。",
+      });
 
-    // 3. 寫入邀請紀錄
     await pool.query(
       "INSERT INTO match_requests (tutor_id, tutee_id, status) VALUES ($1, $2, 'pending')",
-      [tutorId, tuteeUserId]
+      [tutorId, tuteeUserId],
     );
-
-    res.json({ success: true, message: '✅ 邀請已成功發送！請靜候外籍生回覆。' });
+    res.json({
+      success: true,
+      message: "✅ 邀請已成功發送！請靜候外籍生回覆。",
+    });
   } catch (error) {
-    console.error('發送邀請失敗:', error);
+    console.error("發送邀請失敗:", error);
     res.status(500).json({ success: false });
   }
 });
 
-// 🚀 第十三支 API：外籍生查看「收到的邀請」 (GET)
-app.get('/api/match/requests/:account', async (req, res) => {
-  const { account } = req.params;
+// 🚀 第十三支 API：外籍生查看收到的邀請 (GET)
+app.get("/api/match/requests/:account", async (req, res) => {
   try {
-    const tuteeRes = await pool.query('SELECT id FROM users WHERE account = $1', [account]);
-    if (tuteeRes.rows.length === 0) return res.status(404).json({ success: false });
+    const tuteeRes = await pool.query(
+      "SELECT id FROM users WHERE account = $1",
+      [req.params.account],
+    );
+    if (tuteeRes.rows.length === 0)
+      return res.status(404).json({ success: false });
     const tuteeId = tuteeRes.rows[0].id;
 
-    // 找出所有 status = 'pending' 的邀請，並附上小老師的資料
-    const query = `
+    const result = await pool.query(
+      `
       SELECT 
         m.id as request_id,
         u.id as tutor_user_id, u.chinese_name, u.english_name, u.student_id,
@@ -481,157 +515,805 @@ app.get('/api/match/requests/:account', async (req, res) => {
       JOIN users u ON m.tutor_id = u.id
       JOIN tutor_profiles t ON u.id = t.user_id
       WHERE m.tutee_id = $1 AND m.status = 'pending'
-    `;
-    const result = await pool.query(query, [tuteeId]);
+    `,
+      [tuteeId],
+    );
     res.json({ success: true, data: result.rows });
   } catch (error) {
     res.status(500).json({ success: false });
   }
 });
 
-// 🚀 第十四支 API：外籍生回應邀請 (同意 / 婉拒) (POST)
-app.post('/api/match/respond', async (req, res) => {
+// 🚀 第十四支 API：外籍生回應邀請 (POST)
+app.post("/api/match/respond", async (req, res) => {
   const { requestId, tuteeAccount, tutorUserId, action } = req.body;
   try {
-    const tuteeRes = await pool.query('SELECT id FROM users WHERE account = $1', [tuteeAccount]);
+    const tuteeRes = await pool.query(
+      "SELECT id FROM users WHERE account = $1",
+      [tuteeAccount],
+    );
     const tuteeId = tuteeRes.rows[0].id;
 
-    if (action === 'reject') {
-      await pool.query("UPDATE match_requests SET status = 'rejected' WHERE id = $1", [requestId]);
-      return res.json({ success: true, message: '已婉拒該邀請' });
+    if (action === "reject") {
+      await pool.query(
+        "UPDATE match_requests SET status = 'rejected' WHERE id = $1",
+        [requestId],
+      );
+      return res.json({ success: true, message: "已婉拒該邀請" });
     }
 
-    if (action === 'accept') {
-      // 1. 同意該邀請
-      await pool.query("UPDATE match_requests SET status = 'accepted' WHERE id = $1", [requestId]);
-      // 2. 把其他發給這位外籍生的邀請，全部自動拒絕
-      await pool.query("UPDATE match_requests SET status = 'rejected' WHERE tutee_id = $1 AND status = 'pending'", [tuteeId]);
-      // 3. 寫入雙向綁定 ID！
-      await pool.query("UPDATE tutee_profiles SET matched_tutor_id = $1 WHERE user_id = $2", [tutorUserId, tuteeId]);
-      await pool.query("UPDATE tutor_profiles SET matched_tutee_id = $1 WHERE user_id = $2", [tuteeId, tutorUserId]);
-
-      return res.json({ success: true, message: '🎉 配對成功！' });
+    if (action === "accept") {
+      await pool.query(
+        "UPDATE match_requests SET status = 'accepted' WHERE id = $1",
+        [requestId],
+      );
+      await pool.query(
+        "UPDATE match_requests SET status = 'rejected' WHERE tutee_id = $1 AND status = 'pending'",
+        [tuteeId],
+      );
+      await pool.query(
+        "UPDATE tutee_profiles SET matched_tutor_id = $1 WHERE user_id = $2",
+        [tutorUserId, tuteeId],
+      );
+      await pool.query(
+        "UPDATE tutor_profiles SET matched_tutee_id = $1 WHERE user_id = $2",
+        [tuteeId, tutorUserId],
+      );
+      return res.json({ success: true, message: "🎉 配對成功！" });
     }
   } catch (error) {
     res.status(500).json({ success: false });
   }
 });
 
-// 🚀 第十五支 API：獲取已配對的小老師詳細資訊 (GET)
-app.get('/api/match/tutor-info/:tutorId', async (req, res) => {
+// 🚀 第十五支 API：獲取已配對的小老師資訊 (GET)
+app.get("/api/match/tutor-info/:tutorId", async (req, res) => {
   try {
-    const query = `
+    const result = await pool.query(
+      `
       SELECT u.chinese_name, u.english_name, u.email, 
              t.student_status, t.department, t.teaching_notes, t.available_times
       FROM users u
       JOIN tutor_profiles t ON u.id = t.user_id
       WHERE u.id = $1
-    `;
-    const result = await pool.query(query, [req.params.tutorId]);
+    `,
+      [req.params.tutorId],
+    );
     res.json({ success: true, data: result.rows[0] });
   } catch (error) {
     res.status(500).json({ success: false });
   }
 });
 
-// 🚀 第十六支 API：獲取已配對的外籍生詳細資訊 (GET)
-app.get('/api/match/tutee-info/:tuteeId', async (req, res) => {
+// 🚀 第十六支 API：獲取已配對的外籍生資訊 (GET)
+app.get("/api/match/tutee-info/:tuteeId", async (req, res) => {
   try {
-    const query = `
+    const result = await pool.query(
+      `
       SELECT u.chinese_name, u.english_name, u.email, u.student_id,
              p.nationality, p.department, p.learning_duration, p.overall_level,
              p.target_skills, p.skills_to_improve, p.available_times
       FROM users u
       JOIN tutee_profiles p ON u.id = p.user_id
       WHERE u.id = $1
-    `;
-    const result = await pool.query(query, [req.params.tuteeId]);
+    `,
+      [req.params.tuteeId],
+    );
     res.json({ success: true, data: result.rows[0] });
   } catch (error) {
     res.status(500).json({ success: false });
   }
 });
 
-// 🚀 第十七支 API：小老師安排課程 (支援單次、多天與重複) (POST)
-app.post('/api/classes/schedule', async (req, res) => {
+// 🚀 第十七支 API：小老師安排課程 (POST)
+app.post("/api/classes/schedule", async (req, res) => {
   const { tutorAccount, tuteeUserId, slots, isRecurring, endDate } = req.body;
-  
   try {
-    // 1. 找出小老師的 ID
-    const tutorRes = await pool.query('SELECT id FROM users WHERE account = $1', [tutorAccount]);
+    const tutorRes = await pool.query(
+      "SELECT id FROM users WHERE account = $1",
+      [tutorAccount],
+    );
     const tutorId = tutorRes.rows[0].id;
 
-    // 2. 準備要寫入的日期陣列
     let classInstances = [];
-    
-    // 針對每一個設定的時段 (可能是一天，也可能是兩天)
+
     for (const slot of slots) {
-        const baseDate = new Date(slot.date);
-        // 把首週的課加進去
-        classInstances.push({ date: slot.date, start: slot.startTime, end: slot.endTime });
-        
-        // 如果有勾選重複，且有設定結束日期
-        if (isRecurring && endDate) {
-            const end = new Date(endDate);
-            let nextDate = new Date(baseDate);
-            nextDate.setDate(nextDate.getDate() + 7); // 加 7 天
-            
-            // 一直加 7 天，直到超過結束日期為止
-            while (nextDate <= end) {
-                classInstances.push({ 
-                    date: nextDate.toISOString().split('T')[0], 
-                    start: slot.startTime, 
-                    end: slot.endTime 
-                });
-                nextDate.setDate(nextDate.getDate() + 7);
-            }
+      // ✅ 修正：用本地時間解析日期，避免時區問題
+      const [y, m, d] = slot.date.split("-").map(Number);
+      classInstances.push({
+        date: slot.date,
+        start: slot.startTime,
+        end: slot.endTime,
+      });
+
+      if (isRecurring && endDate) {
+        const [ey, em, ed] = endDate.split("-").map(Number);
+        const end = new Date(ey, em - 1, ed);
+        let nextDate = new Date(y, m - 1, d);
+        nextDate.setDate(nextDate.getDate() + 7);
+
+        while (nextDate <= end) {
+          const yyyy = nextDate.getFullYear();
+          const mm = String(nextDate.getMonth() + 1).padStart(2, "0");
+          const dd = String(nextDate.getDate()).padStart(2, "0");
+          classInstances.push({
+            date: `${yyyy}-${mm}-${dd}`,
+            start: slot.startTime,
+            end: slot.endTime,
+          });
+          nextDate.setDate(nextDate.getDate() + 7);
         }
+      }
     }
 
-    // 3. 批次寫入資料庫
     for (const cls of classInstances) {
       await pool.query(
-        `INSERT INTO classes (tutor_id, tutee_id, class_date, start_time, end_time) 
-         VALUES ($1, $2, $3, $4, $5)`,
-        [tutorId, tuteeUserId, cls.date, cls.start, cls.end]
+        `INSERT INTO classes (tutor_id, tutee_id, class_date, start_time, end_time) VALUES ($1, $2, $3, $4, $5)`,
+        [tutorId, tuteeUserId, cls.date, cls.start, cls.end],
       );
     }
 
-    res.json({ success: true, message: `✅ 成功排定 ${classInstances.length} 堂課程！` });
+    res.json({
+      success: true,
+      message: `✅ 成功排定 ${classInstances.length} 堂課程！`,
+    });
   } catch (error) {
-    console.error('排課失敗:', error);
-    res.status(500).json({ success: false, message: '排課失敗' });
+    console.error("排課失敗:", error);
+    res.status(500).json({ success: false, message: "排課失敗" });
   }
 });
 
-// 🚀 第十八支 API：獲取某人的所有課程 (GET)
-app.get('/api/classes/:userId', async (req, res) => {
+// 🚀 第十八支 API：獲取某人的所有課程 (GET) ✅ 修正時區 + 加入 has_note
+app.get("/api/classes/:userId", async (req, res) => {
   try {
-    // 找出所有未取消的課程，並依照日期與時間排序
-    const query = `
-      SELECT id, class_date, start_time, end_time, status 
-      FROM classes 
-      WHERE (tutor_id = $1 OR tutee_id = $1) AND status != 'cancelled'
-      ORDER BY class_date ASC, start_time ASC
-    `;
-    const result = await pool.query(query, [req.params.userId]);
+    const userId = req.params.userId;
+    const result = await pool.query(
+      `
+      SELECT 
+        c.id,
+        c.class_date::text,
+        c.start_time,
+        c.end_time,
+        c.status,
+        c.tutor_signed_at,
+        c.tutee_signed_at,
+        CASE WHEN cn.id IS NOT NULL THEN true ELSE false END AS has_note
+      FROM classes c
+      LEFT JOIN class_notes cn ON cn.class_id = c.id AND cn.user_id = $1
+      WHERE (c.tutor_id = $1 OR c.tutee_id = $1) AND c.status != 'cancelled'
+      ORDER BY c.class_date ASC, c.start_time ASC
+    `,
+      [userId],
+    );
+    res.json({ success: true, data: result.rows });
+  } catch (error) {
+    console.error("獲取課表失敗:", error);
+    res.status(500).json({ success: false });
+  }
+});
+
+// 🚀 第十九支 API：編輯單筆課程時間 (PUT)
+app.put("/api/classes/:id", async (req, res) => {
+  const { classDate, startTime, endTime } = req.body;
+  try {
+    await pool.query(
+      "UPDATE classes SET class_date = $1, start_time = $2, end_time = $3 WHERE id = $4",
+      [classDate, startTime, endTime, req.params.id],
+    );
+    res.json({ success: true, message: "✅ 課程時間已成功更新！" });
+  } catch (error) {
+    console.error("更新課程失敗:", error);
+    res.status(500).json({ success: false, message: "更新失敗" });
+  }
+});
+
+// 🚀 忘記密碼 API (POST)
+app.post("/api/reset-password", async (req, res) => {
+  const { account, studentId, newPassword } = req.body;
+  if (!account || !studentId || !newPassword)
+    return res.status(400).json({ success: false, message: "請填寫所有欄位" });
+
+  try {
+    const result = await pool.query(
+      "SELECT id FROM users WHERE account = $1 AND student_id = $2",
+      [account, studentId],
+    );
+    if (result.rows.length === 0)
+      return res
+        .status(401)
+        .json({ success: false, message: "帳號或學號不正確，請重新確認" });
+
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(newPassword, salt);
+    await pool.query("UPDATE users SET password = $1 WHERE id = $2", [
+      hashedPassword,
+      result.rows[0].id,
+    ]);
+    res.json({ success: true, message: "密碼已成功重設！請用新密碼登入。" });
+  } catch (error) {
+    console.error("重設密碼失敗:", error);
+    res.status(500).json({ success: false, message: "伺服器發生錯誤" });
+  }
+});
+
+// 🚀 外籍生課表 API (GET) ✅ 修正時區
+app.get("/api/tutee-classes/:account", async (req, res) => {
+  try {
+    const userRes = await pool.query(
+      "SELECT id FROM users WHERE account = $1",
+      [req.params.account],
+    );
+    if (userRes.rows.length === 0)
+      return res.status(404).json({ success: false, message: "找不到使用者" });
+
+    const tuteeId = userRes.rows[0].id;
+    const result = await pool.query(
+      `
+      SELECT 
+        c.id,
+        c.class_date::text,
+        c.start_time,
+        c.end_time,
+        c.status,
+        c.tutor_signed_at,
+        c.tutee_signed_at,
+        u.chinese_name AS tutor_chinese_name,
+        u.english_name AS tutor_english_name,
+        CASE WHEN cn.id IS NOT NULL THEN true ELSE false END AS has_note
+      FROM classes c
+      JOIN users u ON c.tutor_id = u.id
+      LEFT JOIN class_notes cn ON cn.class_id = c.id AND cn.user_id = $1
+      WHERE c.tutee_id = $1 AND c.status != 'cancelled'
+      ORDER BY c.class_date ASC, c.start_time ASC
+    `,
+      [tuteeId],
+    );
+
+    res.json({ success: true, data: result.rows });
+  } catch (error) {
+    console.error("獲取外籍生課表失敗:", error);
+    res.status(500).json({ success: false, message: "伺服器發生錯誤" });
+  }
+});
+
+// 🚀 簽到 API (POST) ✅ 修正時區
+app.post("/api/classes/:id/checkin", async (req, res) => {
+  const { role } = req.body;
+  const classId = req.params.id;
+
+  try {
+    const classRes = await pool.query(
+      "SELECT class_date::text, start_time, end_time FROM classes WHERE id = $1",
+      [classId],
+    );
+    if (classRes.rows.length === 0)
+      return res.status(404).json({ success: false, message: "找不到課程" });
+
+    const cls = classRes.rows[0];
+    const dateStr = cls.class_date; // ✅ 已經是純字串
+
+    const now = new Date();
+    const deadline = new Date(`${dateStr}T23:59:59`);
+    if (now > deadline)
+      return res
+        .status(400)
+        .json({ success: false, message: "已超過簽到時間，請使用補簽到功能" });
+
+    const classStart = new Date(`${dateStr}T${cls.start_time}`);
+    const windowStart = new Date(classStart.getTime() - 30 * 60 * 1000);
+    if (now < windowStart)
+      return res.status(400).json({
+        success: false,
+        message: "還沒到簽到時間！(上課前30分鐘才能簽到)",
+      });
+
+    const field = role === "tutor" ? "tutor_signed_at" : "tutee_signed_at";
+    const checkRes = await pool.query(
+      `SELECT ${field} FROM classes WHERE id = $1`,
+      [classId],
+    );
+    if (checkRes.rows[0][field])
+      return res
+        .status(400)
+        .json({ success: false, message: "您已經簽到過了！" });
+
+    await pool.query(`UPDATE classes SET ${field} = NOW() WHERE id = $1`, [
+      classId,
+    ]);
+    res.json({ success: true, message: "✅ 簽到成功！" });
+  } catch (error) {
+    console.error("簽到失敗:", error);
+    res.status(500).json({ success: false, message: "伺服器發生錯誤" });
+  }
+});
+
+// 🚀 補簽到申請 (POST) ✅ 修正時區
+app.post(
+  "/api/classes/:id/makeup-checkin",
+  upload.single("attachment"),
+  async (req, res) => {
+    const { userId, role, reason } = req.body;
+    const classId = req.params.id;
+    const filename = req.file ? req.file.filename : null;
+
+    try {
+      const classRes = await pool.query(
+        "SELECT class_date::text FROM classes WHERE id = $1",
+        [classId],
+      );
+      const dateStr = classRes.rows[0].class_date; // ✅ 純字串
+      const deadline = new Date(`${dateStr}T23:59:59`);
+      if (new Date() <= deadline)
+        return res
+          .status(400)
+          .json({ success: false, message: "還在簽到時間內，請使用一般簽到" });
+
+      const field = role === "tutor" ? "tutor_signed_at" : "tutee_signed_at";
+      const checkRes = await pool.query(
+        `SELECT ${field} FROM classes WHERE id = $1`,
+        [classId],
+      );
+      if (checkRes.rows[0][field])
+        return res
+          .status(400)
+          .json({ success: false, message: "您已經簽到過了，不需要補簽" });
+
+      const dupCheck = await pool.query(
+        "SELECT id FROM makeup_checkins WHERE class_id = $1 AND user_id = $2 AND status = 'pending'",
+        [classId, userId],
+      );
+      if (dupCheck.rows.length > 0)
+        return res
+          .status(400)
+          .json({ success: false, message: "您已有一筆待審核的補簽申請" });
+
+      const countRes = await pool.query(
+        "SELECT COUNT(*) FROM makeup_checkins WHERE user_id = $1 AND status != 'rejected'",
+        [userId],
+      );
+      if (parseInt(countRes.rows[0].count) >= 5)
+        return res
+          .status(400)
+          .json({ success: false, message: "您已用完所有補簽次數（上限5次）" });
+
+      await pool.query(
+        "INSERT INTO makeup_checkins (class_id, user_id, role, reason, attachment_file) VALUES ($1, $2, $3, $4, $5)",
+        [classId, userId, role, reason, filename],
+      );
+
+      res.json({
+        success: true,
+        message: "✅ 補簽申請已送出，請等待管理員審核",
+      });
+    } catch (error) {
+      console.error("補簽申請失敗:", error);
+      res.status(500).json({ success: false, message: "伺服器發生錯誤" });
+    }
+  },
+);
+
+// 🚀 管理員：查看所有補簽申請 (GET)
+app.get("/api/admin/makeup-checkins", async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT m.id, m.class_id, m.role, m.reason, m.attachment_file, m.status, m.created_at,
+             u.chinese_name, u.english_name, u.account,
+             c.class_date::text, c.start_time, c.end_time
+      FROM makeup_checkins m
+      JOIN users u ON m.user_id = u.id
+      JOIN classes c ON m.class_id = c.id
+      ORDER BY m.created_at DESC
+    `);
     res.json({ success: true, data: result.rows });
   } catch (error) {
     res.status(500).json({ success: false });
   }
 });
 
-// 🚀 第十九支 API：編輯單筆課程時間 (PUT)
-app.put('/api/classes/:id', async (req, res) => {
-  const { classDate, startTime, endTime } = req.body;
+// 🚀 管理員：審核補簽申請 (POST)
+app.post("/api/admin/makeup-checkins/:id/review", async (req, res) => {
+  const { action } = req.body;
+  try {
+    const makeupRes = await pool.query(
+      "SELECT * FROM makeup_checkins WHERE id = $1",
+      [req.params.id],
+    );
+    const makeup = makeupRes.rows[0];
+
+    await pool.query(
+      "UPDATE makeup_checkins SET status = $1, reviewed_at = NOW() WHERE id = $2",
+      [action, req.params.id],
+    );
+
+    if (action === "approved") {
+      const field =
+        makeup.role === "tutor" ? "tutor_signed_at" : "tutee_signed_at";
+      await pool.query(`UPDATE classes SET ${field} = NOW() WHERE id = $1`, [
+        makeup.class_id,
+      ]);
+    }
+
+    res.json({
+      success: true,
+      message: action === "approved" ? "✅ 已核准補簽" : "❌ 已駁回申請",
+    });
+  } catch (error) {
+    res.status(500).json({ success: false });
+  }
+});
+
+// 🚀 剩餘補簽次數 (GET)
+app.get("/api/makeup-remaining/:userId", async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT COUNT(*) FROM makeup_checkins WHERE user_id = $1 AND status != 'rejected'",
+      [req.params.userId],
+    );
+    res.json({ success: true, remaining: 5 - parseInt(result.rows[0].count) });
+  } catch (error) {
+    res.status(500).json({ success: false });
+  }
+});
+
+// 🚀 管理員：查看所有課程簽到狀態 (GET)
+app.get("/api/admin/checkins", async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT c.id, c.class_date::text, c.start_time, c.end_time,
+             c.tutor_signed_at, c.tutee_signed_at,
+             tu.chinese_name as tutor_name, tu.english_name as tutor_english,
+             te.chinese_name as tutee_name, te.english_name as tutee_english
+      FROM classes c
+      JOIN users tu ON c.tutor_id = tu.id
+      JOIN users te ON c.tutee_id = te.id
+      ORDER BY c.class_date DESC, c.start_time DESC
+    `);
+    res.json({ success: true, data: result.rows });
+  } catch (error) {
+    console.error("撈取簽到資料失敗:", error);
+    res.status(500).json({ success: false, message: "伺服器發生錯誤" });
+  }
+});
+
+// 🚀 新增/更新課堂紀錄 (POST) ✅ 修正時區
+app.post(
+  "/api/classes/:id/notes",
+  upload.single("attachment"),
+  async (req, res) => {
+    const { userId, role, location, content, remarks } = req.body;
+    const classId = req.params.id;
+    const filename = req.file ? req.file.filename : null;
+
+    try {
+      const classRes = await pool.query(
+        "SELECT class_date::text FROM classes WHERE id = $1",
+        [classId],
+      );
+      const dateStr = classRes.rows[0].class_date; // ✅ 純字串
+      const deadline = new Date(`${dateStr}T23:59:59`);
+
+      if (new Date() > deadline)
+        return res.status(400).json({
+          success: false,
+          message: "已超過填寫時間，請使用補填申請功能",
+        });
+
+      const query = filename
+        ? `INSERT INTO class_notes (class_id, user_id, role, location, content, remarks, attachment_file, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+         ON CONFLICT (class_id, user_id)
+         DO UPDATE SET location=$4, content=$5, remarks=$6, attachment_file=$7, updated_at=NOW()`
+        : `INSERT INTO class_notes (class_id, user_id, role, location, content, remarks, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, NOW())
+         ON CONFLICT (class_id, user_id)
+         DO UPDATE SET location=$4, content=$5, remarks=$6, updated_at=NOW()`;
+
+      const params = filename
+        ? [classId, userId, role, location, content, remarks, filename]
+        : [classId, userId, role, location, content, remarks];
+
+      await pool.query(query, params);
+      res.json({ success: true, message: "課堂紀錄已儲存！" });
+    } catch (error) {
+      console.error("儲存課堂紀錄失敗:", error);
+      res.status(500).json({ success: false, message: "伺服器發生錯誤" });
+    }
+  },
+);
+
+// 🚀 補填課堂紀錄申請 (POST) ✅ 修正時區
+app.post(
+  "/api/classes/:id/makeup-notes",
+  upload.single("attachment"),
+  async (req, res) => {
+    const { userId, role, location, content, remarks } = req.body;
+    const classId = req.params.id;
+    const filename = req.file ? req.file.filename : null;
+
+    try {
+      const classRes = await pool.query(
+        "SELECT class_date::text FROM classes WHERE id = $1",
+        [classId],
+      );
+      const dateStr = classRes.rows[0].class_date; // ✅ 純字串
+      const deadline = new Date(`${dateStr}T23:59:59`);
+
+      if (new Date() <= deadline)
+        return res
+          .status(400)
+          .json({ success: false, message: "還在填寫時間內，請直接儲存紀錄" });
+
+      const dupCheck = await pool.query(
+        "SELECT id FROM makeup_notes WHERE class_id = $1 AND user_id = $2",
+        [classId, userId],
+      );
+      if (dupCheck.rows.length > 0)
+        return res.status(400).json({
+          success: false,
+          message: "您已有一筆補填申請（待審核或已通過）",
+        });
+
+      const countRes = await pool.query(
+        "SELECT COUNT(*) FROM makeup_notes WHERE user_id = $1 AND status != 'rejected'",
+        [userId],
+      );
+      if (parseInt(countRes.rows[0].count) >= 5)
+        return res
+          .status(400)
+          .json({ success: false, message: "您已用完所有補填次數（上限5次）" });
+
+      await pool.query(
+        "INSERT INTO makeup_notes (class_id, user_id, role, location, content, remarks, attachment_file) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+        [
+          classId,
+          userId,
+          role,
+          location || "",
+          content,
+          remarks || "",
+          filename,
+        ],
+      );
+
+      res.json({
+        success: true,
+        message: "✅ 補填申請已送出，請等待管理員審核",
+      });
+    } catch (error) {
+      console.error("補填申請失敗:", error);
+      res.status(500).json({ success: false, message: "伺服器發生錯誤" });
+    }
+  },
+);
+
+// 🚀 剩餘補填次數 (GET)
+app.get("/api/notes-remaining/:userId", async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT COUNT(*) FROM makeup_notes WHERE user_id = $1 AND status != 'rejected'",
+      [req.params.userId],
+    );
+    res.json({ success: true, remaining: 5 - parseInt(result.rows[0].count) });
+  } catch (error) {
+    res.status(500).json({ success: false });
+  }
+});
+
+// 🚀 管理員：查看補填申請 (GET)
+app.get("/api/admin/makeup-notes", async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT m.id, m.class_id, m.role, m.location, m.content, m.remarks,
+             m.attachment_file, m.status, m.created_at,
+             u.chinese_name, u.english_name, u.account,
+             c.class_date::text, c.start_time, c.end_time
+      FROM makeup_notes m
+      JOIN users u ON m.user_id = u.id
+      JOIN classes c ON m.class_id = c.id
+      ORDER BY m.created_at DESC
+    `);
+    res.json({ success: true, data: result.rows });
+  } catch (error) {
+    res.status(500).json({ success: false });
+  }
+});
+
+// 🚀 管理員：審核補填申請 (POST)
+app.post("/api/admin/makeup-notes/:id/review", async (req, res) => {
+  const { action } = req.body;
+  try {
+    const makeupRes = await pool.query(
+      "SELECT * FROM makeup_notes WHERE id = $1",
+      [req.params.id],
+    );
+    const makeup = makeupRes.rows[0];
+
+    await pool.query(
+      "UPDATE makeup_notes SET status = $1, reviewed_at = NOW() WHERE id = $2",
+      [action, req.params.id],
+    );
+
+    if (action === "approved") {
+      await pool.query(
+        `INSERT INTO class_notes (class_id, user_id, role, location, content, remarks, attachment_file, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+         ON CONFLICT (class_id, user_id)
+         DO UPDATE SET location=$4, content=$5, remarks=$6, attachment_file=$7, updated_at=NOW()`,
+        [
+          makeup.class_id,
+          makeup.user_id,
+          makeup.role,
+          makeup.location,
+          makeup.content,
+          makeup.remarks,
+          makeup.attachment_file,
+        ],
+      );
+    }
+
+    res.json({
+      success: true,
+      message: action === "approved" ? "✅ 已核准補填" : "❌ 已駁回申請",
+    });
+  } catch (error) {
+    res.status(500).json({ success: false });
+  }
+});
+
+// 🚀 查詢課堂紀錄 (GET)
+app.get("/api/classes/:id/notes/:userId", async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT * FROM class_notes WHERE class_id = $1 AND user_id = $2",
+      [req.params.id, req.params.userId],
+    );
+    res.json({ success: true, data: result.rows[0] || null });
+  } catch (error) {
+    res.status(500).json({ success: false });
+  }
+});
+
+// 🚀 送出異常回報 (POST)
+app.post(
+  "/api/classes/:id/report",
+  upload.single("attachment"),
+  async (req, res) => {
+    const { userId, role, reportType, location, content } = req.body;
+    const classId = req.params.id;
+    const filename = req.file ? req.file.filename : null;
+
+    if (!content?.trim())
+      return res
+        .status(400)
+        .json({ success: false, message: "請填寫回報內容" });
+
+    try {
+      await pool.query(
+        `INSERT INTO incident_reports (class_id, user_id, role, report_type, location, content, attachment_file)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [classId, userId, role, reportType, location || "", content, filename],
+      );
+      res.json({ success: true, message: "✅ 異常回報已送出，助教將盡快處理" });
+    } catch (error) {
+      console.error("異常回報失敗:", error);
+      res.status(500).json({ success: false, message: "伺服器發生錯誤" });
+    }
+  },
+);
+
+// 🚀 管理員：查看所有異常回報 (GET)
+app.get("/api/admin/reports", async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT r.id, r.class_id, r.role, r.report_type, r.location,
+             r.content, r.attachment_file, r.status, r.created_at,
+             u.chinese_name, u.english_name, u.account,
+             c.class_date::text, c.start_time, c.end_time
+      FROM incident_reports r
+      JOIN users u ON r.user_id = u.id
+      JOIN classes c ON r.class_id = c.id
+      ORDER BY r.created_at DESC
+    `);
+    res.json({ success: true, data: result.rows });
+  } catch (error) {
+    res.status(500).json({ success: false });
+  }
+});
+
+// 🚀 管理員：更新回報狀態 (POST)
+app.post("/api/admin/reports/:id/status", async (req, res) => {
+  const { status } = req.body;
+  try {
+    await pool.query("UPDATE incident_reports SET status = $1 WHERE id = $2", [
+      status,
+      req.params.id,
+    ]);
+    res.json({ success: true, message: "狀態已更新" });
+  } catch (error) {
+    res.status(500).json({ success: false });
+  }
+});
+
+// 🚀 送出緊急通報 (POST) ✅ 修正時區
+app.post("/api/classes/:id/emergency", async (req, res) => {
+  const { userId, role } = req.body;
+  const classId = req.params.id;
+
+  try {
+    const classRes = await pool.query(
+      "SELECT class_date::text, start_time, end_time FROM classes WHERE id = $1",
+      [classId],
+    );
+    if (classRes.rows.length === 0)
+      return res.status(404).json({ success: false, message: "找不到課程" });
+
+    const cls = classRes.rows[0];
+    const dateStr = cls.class_date; // ✅ 純字串
+
+    const now = new Date();
+    const classStart = new Date(`${dateStr}T${cls.start_time}`);
+    const classEnd = new Date(`${dateStr}T${cls.end_time}`);
+
+    if (now < classStart || now > classEnd)
+      return res
+        .status(400)
+        .json({ success: false, message: "只能在上課時間內使用緊急通報！" });
+
+    const dupCheck = await pool.query(
+      "SELECT id FROM emergency_alerts WHERE class_id = $1 AND sender_id = $2",
+      [classId, userId],
+    );
+    if (dupCheck.rows.length > 0)
+      return res.status(400).json({
+        success: false,
+        message: "您已送出過緊急通報，請等待助教處理",
+      });
+
+    await pool.query(
+      "INSERT INTO emergency_alerts (class_id, sender_id, sender_role) VALUES ($1, $2, $3)",
+      [classId, userId, role],
+    );
+
+    res.json({ success: true, message: "🚨 緊急通報已送出！助教將立即處理。" });
+  } catch (error) {
+    console.error("緊急通報失敗:", error);
+    res.status(500).json({ success: false, message: "伺服器發生錯誤" });
+  }
+});
+
+// 🚀 管理員：查看緊急通報 (GET) ✅ 修正時區
+app.get("/api/admin/emergency-alerts", async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        e.id, e.class_id, e.sender_role, e.is_read, e.created_at,
+        sender.chinese_name, sender.english_name, sender.account,
+        c.class_date::text, c.start_time, c.end_time,
+        CASE WHEN e.sender_role = 'tutor' THEN tutee_u.chinese_name ELSE tutor_u.chinese_name END AS target_chinese_name,
+        CASE WHEN e.sender_role = 'tutor' THEN tutee_u.english_name ELSE tutor_u.english_name END AS target_english_name,
+        CASE WHEN e.sender_role = 'tutor' THEN 'tutee' ELSE 'tutor' END AS target_role
+      FROM emergency_alerts e
+      JOIN users sender ON e.sender_id = sender.id
+      JOIN classes c ON e.class_id = c.id
+      JOIN users tutor_u ON c.tutor_id = tutor_u.id
+      JOIN users tutee_u ON c.tutee_id = tutee_u.id
+      ORDER BY e.created_at DESC
+    `);
+    res.json({ success: true, data: result.rows });
+  } catch (error) {
+    res.status(500).json({ success: false });
+  }
+});
+
+// 🚀 管理員：標記緊急通報已讀 (POST)
+app.post("/api/admin/emergency-alerts/:id/read", async (req, res) => {
   try {
     await pool.query(
-      'UPDATE classes SET class_date = $1, start_time = $2, end_time = $3 WHERE id = $4',
-      [classDate, startTime, endTime, req.params.id]
+      "UPDATE emergency_alerts SET is_read = TRUE WHERE id = $1",
+      [req.params.id],
     );
-    res.json({ success: true, message: '✅ 課程時間已成功更新！' });
+    res.json({ success: true });
   } catch (error) {
-    console.error('更新課程失敗:', error);
-    res.status(500).json({ success: false, message: '更新失敗' });
+    res.status(500).json({ success: false });
   }
 });
