@@ -555,8 +555,11 @@ function TuteeDashboard() {
 
             {(() => {
               const dateStr = cls.class_date.split("T")[0];
-              const isNoteDeadlinePassed =
-                new Date() > new Date(`${dateStr}T23:59:59`);
+              const nowTime = new Date();
+              const classStart = new Date(`${dateStr}T${cls.start_time}`);
+              const deadline = new Date(`${dateStr}T23:59:59`);
+              const canFillNote = nowTime >= classStart;
+              const isNoteDeadlinePassed = nowTime > deadline;
 
               if (cls.has_note) {
                 return (
@@ -585,11 +588,26 @@ function TuteeDashboard() {
                     </span>
                   </button>
                 );
-              } else {
+              } else if (canFillNote) {
                 return (
                   <button
                     onClick={() => handleOpenNotesModal(cls)}
                     className="flex flex-col items-center justify-center py-2 rounded-lg text-slate-500 hover:bg-green-50 hover:text-green-600 transition"
+                  >
+                    <FileText size={16} className="mb-1" />
+                    <span className="text-xs font-bold text-center leading-tight">
+                      課堂紀錄
+                      <br />
+                      Notes
+                    </span>
+                  </button>
+                );
+              } else {
+                return (
+                  <button
+                    disabled
+                    title="上課開始後才能填寫"
+                    className="flex flex-col items-center justify-center py-2 rounded-lg text-slate-300 cursor-not-allowed"
                   >
                     <FileText size={16} className="mb-1" />
                     <span className="text-xs font-bold text-center leading-tight">

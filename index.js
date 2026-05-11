@@ -986,13 +986,25 @@ app.post(
 
     try {
       const classRes = await pool.query(
-        "SELECT class_date::text FROM classes WHERE id = $1",
+        "SELECT class_date::text, start_time FROM classes WHERE id = $1",
         [classId],
       );
-      const dateStr = classRes.rows[0].class_date; // ✅ 純字串
+      const dateStr = classRes.rows[0].class_date;
+      const startTime = classRes.rows[0].start_time;
+
+      const now = new Date();
+      const classStart = new Date(`${dateStr}T${startTime}`);
       const deadline = new Date(`${dateStr}T23:59:59`);
 
-      if (new Date() > deadline)
+      // 2. 還沒到上課時間 → 不能填
+      if (now < classStart)
+        return res.status(400).json({
+          success: false,
+          message: "上課開始後才能填寫課堂紀錄！",
+        });
+
+      // 3. 超過當天截止 → 走補填流程
+      if (now > deadline)
         return res.status(400).json({
           success: false,
           message: "已超過填寫時間，請使用補填申請功能",
@@ -1321,10 +1333,14 @@ app.post("/api/admin/emergency-alerts/:id/read", async (req, res) => {
 // 🚀 輔導時數查詢 API (GET)
 // 邏輯：tutor_signed_at + has_note(class_notes) → 視為「待審/通過」
 // 管理員在 hours_review 表中審查，status: 'pending' | 'approved' | 'rejected'
+// ============================================================
+// 取代 index.js 裡的 GET /api/tutor/hours/:userId
+// 新邏輯：有簽到 + 有紀錄 → 直接計入，不需手動送審
+// ============================================================
+
 app.get("/api/tutor/hours/:userId", async (req, res) => {
   const { userId } = req.params;
   try {
-    // 撈出所有「老師已簽到 + 老師已填紀錄」的課，並 left join 時數審查結果
     const result = await pool.query(
       `
       SELECT
@@ -1334,18 +1350,13 @@ app.get("/api/tutor/hours/:userId", async (req, res) => {
         c.end_time,
         c.tutor_signed_at,
         cn.id           AS note_id,
-        hr.id           AS review_id,
-        hr.status       AS review_status,   -- pending | approved | rejected | null
-        hr.reviewed_at,
         EXTRACT(EPOCH FROM (
-          TO_TIMESTAMP(c.end_time::text, 'HH24:MI:SS') -
+          TO_TIMESTAMP(c.end_time::text,   'HH24:MI:SS') -
           TO_TIMESTAMP(c.start_time::text, 'HH24:MI:SS')
         )) / 3600.0     AS hours
       FROM classes c
       LEFT JOIN class_notes cn
         ON cn.class_id = c.id AND cn.user_id = $1
-      LEFT JOIN hours_review hr
-        ON hr.class_id = c.id AND hr.tutor_id = $1
       WHERE c.tutor_id = $1
         AND c.status != 'cancelled'
       ORDER BY c.class_date ASC, c.start_time ASC
@@ -1353,9 +1364,9 @@ app.get("/api/tutor/hours/:userId", async (req, res) => {
       [userId],
     );
 
-    // 計算已核准總時數
+    // 有簽到 + 有紀錄 → 直接計入
     const approvedHours = result.rows
-      .filter((r) => r.review_status === "approved")
+      .filter((r) => r.tutor_signed_at && r.note_id)
       .reduce((sum, r) => sum + parseFloat(r.hours || 0), 0);
 
     res.json({ success: true, data: result.rows, approvedHours });
@@ -1555,6 +1566,92 @@ app.post("/api/admin/certificate-applications/:id/review", async (req, res) => {
     res.json({
       success: true,
       message: action === "issued" ? "✅ 已核發證書" : "❌ 已駁回申請",
+    });
+  } catch (error) {
+    res.status(500).json({ success: false });
+  }
+});
+
+// ============================================================
+// 貼到 index.js 最底部
+// ============================================================
+
+// 🚀 管理員：查詢所有一般簽到紀錄（老師+學生）(GET)
+app.get("/api/admin/checkin-records", async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT
+        c.id AS class_id,
+        c.class_date::text,
+        c.start_time,
+        c.end_time,
+        c.tutor_signed_at,
+        c.tutee_signed_at,
+        tu.chinese_name  AS tutor_chinese_name,
+        tu.english_name  AS tutor_english_name,
+        te.chinese_name  AS tutee_chinese_name,
+        te.english_name  AS tutee_english_name
+      FROM classes c
+      JOIN users tu ON c.tutor_id = tu.id
+      JOIN users te ON c.tutee_id = te.id
+      WHERE c.status != 'cancelled'
+        AND (c.tutor_signed_at IS NOT NULL OR c.tutee_signed_at IS NOT NULL)
+      ORDER BY c.class_date DESC, c.start_time DESC
+    `);
+    res.json({ success: true, data: result.rows });
+  } catch (error) {
+    console.error("查詢簽到紀錄失敗:", error);
+    res.status(500).json({ success: false });
+  }
+});
+
+// 🚀 管理員：查詢所有課堂紀錄（一般填寫）(GET)
+app.get("/api/admin/class-notes", async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT
+        cn.id,
+        cn.class_id,
+        cn.role,
+        cn.location,
+        cn.content,
+        cn.remarks,
+        cn.attachment_file,
+        cn.updated_at,
+        u.chinese_name,
+        u.english_name,
+        u.student_id,
+        c.class_date::text,
+        c.start_time,
+        c.end_time
+      FROM class_notes cn
+      JOIN users u ON cn.user_id = u.id
+      JOIN classes c ON cn.class_id = c.id
+      ORDER BY cn.updated_at DESC
+    `);
+    res.json({ success: true, data: result.rows });
+  } catch (error) {
+    console.error("查詢課堂紀錄失敗:", error);
+    res.status(500).json({ success: false });
+  }
+});
+
+// 🚀 管理員：取得未讀通知數（補簽到 + 補填紀錄 pending 數量）(GET)
+app.get("/api/admin/pending-counts", async (req, res) => {
+  try {
+    const makeupCheckin = await pool.query(
+      "SELECT COUNT(*) FROM makeup_checkins WHERE status = 'pending'",
+    );
+    const makeupNotes = await pool.query(
+      "SELECT COUNT(*) FROM makeup_notes WHERE status = 'pending'",
+    );
+    res.json({
+      success: true,
+      makeupCheckinCount: parseInt(makeupCheckin.rows[0].count),
+      makeupNotesCount: parseInt(makeupNotes.rows[0].count),
+      total:
+        parseInt(makeupCheckin.rows[0].count) +
+        parseInt(makeupNotes.rows[0].count),
     });
   } catch (error) {
     res.status(500).json({ success: false });

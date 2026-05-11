@@ -58,8 +58,49 @@ function TutorDashboard() {
   });
 
   const [tuteesList, setTuteesList] = useState([]);
-  const [filterLevel, setFilterLevel] = useState("All");
   const [matchedTutee, setMatchedTutee] = useState(null);
+
+  // ── 篩選條件 state ──────────────────────────────────────
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [filterNationality, setFilterNationality] = useState("All");
+  const [filterGender, setFilterGender] = useState("All");
+  const [filterLevel, setFilterLevel] = useState("All");
+  const [filterSkills, setFilterSkills] = useState([]);
+  const [filterDays, setFilterDays] = useState([]);
+  const [filterSlots, setFilterSlots] = useState([]);
+
+  const FILTER_DAYS = [
+    { id: "Mon", label: "一" },
+    { id: "Tue", label: "二" },
+    { id: "Wed", label: "三" },
+    { id: "Thu", label: "四" },
+    { id: "Fri", label: "五" },
+  ];
+  const FILTER_SLOTS = [
+    "09:00-11:00",
+    "11:00-13:00",
+    "13:00-15:00",
+    "15:00-17:00",
+  ];
+
+  const toggleArr = (arr, setArr, val) =>
+    setArr(arr.includes(val) ? arr.filter((x) => x !== val) : [...arr, val]);
+
+  const resetFilters = () => {
+    setFilterNationality("All");
+    setFilterGender("All");
+    setFilterLevel("All");
+    setFilterSkills([]);
+    setFilterDays([]);
+    setFilterSlots([]);
+  };
+
+  const activeFilterCount = [
+    filterGender !== "All",
+    filterLevel !== "All",
+    filterSkills.length > 0,
+    filterDays.length > 0 || filterSlots.length > 0,
+  ].filter(Boolean).length;
 
   // 補簽到相關 state
   const [makeupModal, setMakeupModal] = useState({
@@ -698,10 +739,14 @@ function TutorDashboard() {
 
             {(() => {
               const dateStr = cls.class_date.split("T")[0];
+              const nowTime = new Date();
+              const classStart = new Date(`${dateStr}T${cls.start_time}`);
               const deadline = new Date(`${dateStr}T23:59:59`);
-              const isNoteDeadlinePassed = new Date() > deadline;
+              const canFillNote = nowTime >= classStart; // 上課開始後才能填
+              const isNoteDeadlinePassed = nowTime > deadline; // 超過截止→補填
 
               if (cls.has_note) {
+                // 已填寫：永遠可以查看
                 return (
                   <button
                     onClick={() => handleOpenNotesModal(cls)}
@@ -712,6 +757,7 @@ function TutorDashboard() {
                   </button>
                 );
               } else if (isNoteDeadlinePassed) {
+                // 超過截止且未填 → 補填
                 return (
                   <button
                     onClick={() => handleOpenNotesModal(cls)}
@@ -721,11 +767,24 @@ function TutorDashboard() {
                     <span className="text-xs font-bold">補填紀錄</span>
                   </button>
                 );
-              } else {
+              } else if (canFillNote) {
+                // 上課已開始、截止前 → 可填寫
                 return (
                   <button
                     onClick={() => handleOpenNotesModal(cls)}
                     className="flex flex-col items-center justify-center py-2 rounded-lg text-slate-500 hover:bg-green-50 hover:text-green-600 transition"
+                  >
+                    <FileText size={16} className="mb-1" />
+                    <span className="text-xs font-bold">課堂紀錄</span>
+                  </button>
+                );
+              } else {
+                // 還沒上課 → 灰色 disabled
+                return (
+                  <button
+                    disabled
+                    title="上課開始後才能填寫"
+                    className="flex flex-col items-center justify-center py-2 rounded-lg text-slate-300 cursor-not-allowed"
                   >
                     <FileText size={16} className="mb-1" />
                     <span className="text-xs font-bold">課堂紀錄</span>
@@ -865,37 +924,224 @@ function TutorDashboard() {
 
   // --- 介面 3：尋找外籍生 ---
   const renderFindStudents = () => {
-    const filteredTutees =
-      filterLevel === "All"
-        ? tuteesList
-        : tuteesList.filter((t) => t.overall_level === filterLevel);
+    // 收集所有出現過的國籍
+    const nationalityOptions = [
+      "All",
+      ...Array.from(
+        new Set(tuteesList.map((t) => t.nationality).filter(Boolean)),
+      ),
+    ];
+
+    // 篩選邏輯
+    const filteredTutees = tuteesList.filter((tutee) => {
+      const skills =
+        typeof tutee.target_skills === "string"
+          ? JSON.parse(tutee.target_skills)
+          : tutee.target_skills || {};
+      const times =
+        typeof tutee.available_times === "string"
+          ? JSON.parse(tutee.available_times)
+          : tutee.available_times || { days: [], slots: [] };
+
+      // 國籍
+      if (
+        filterNationality !== "All" &&
+        tutee.nationality !== filterNationality
+      )
+        return false;
+      // 性別
+      if (filterGender !== "All" && tutee.gender !== filterGender) return false;
+      // 程度
+      if (filterLevel !== "All" && tutee.overall_level !== filterLevel)
+        return false;
+      // 技能（選了就要包含全部選中的）
+      if (filterSkills.length > 0 && !filterSkills.every((s) => skills[s]))
+        return false;
+      // 上課時間：只要有任一天或任一時段交集即符合
+      if (filterDays.length > 0) {
+        const tutee_days = times.days || [];
+        const hasDay = filterDays.some((d) => tutee_days.includes(d));
+        if (!hasDay) return false;
+      }
+      if (filterSlots.length > 0) {
+        const tutee_slots = times.slots || [];
+        const hasSlot = filterSlots.some((s) => tutee_slots.includes(s));
+        if (!hasSlot) return false;
+      }
+      return true;
+    });
+
     return (
       <main className="flex-grow flex flex-col gap-6 animate-fade-in">
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden flex flex-col h-full min-h-[600px]">
-          <div className="bg-slate-50 px-8 py-5 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden flex flex-col min-h-[600px]">
+          {/* 標題列 */}
+          <div className="bg-slate-50 px-8 py-5 border-b border-slate-100 flex justify-between items-center">
             <h2 className="font-bold text-lg text-slate-800 flex items-center">
               <Search size={22} className="mr-2 text-primary" /> 尋找外籍生
+              <span className="ml-3 text-sm font-normal text-slate-400">
+                共 {filteredTutees.length} 人
+              </span>
             </h2>
-            <div className="flex items-center space-x-2 text-sm font-bold text-slate-600">
-              <Filter size={16} /> <span>程度篩選：</span>
-              <select
-                value={filterLevel}
-                onChange={(e) => setFilterLevel(e.target.value)}
-                className="bg-white border border-slate-200 rounded-lg px-3 py-1.5 outline-none focus:border-primary"
-              >
-                <option value="All">全部 (All)</option>
-                <option value="不知道 (Unknown)">不知道 (Unknown)</option>
-                <option value="N">N (零基礎)</option>
-                <option value="A1">A1</option>
-                <option value="A2">A2</option>
-                <option value="B1">B1</option>
-                <option value="B2">B2</option>
-                <option value="C1">C1</option>
-                <option value="C2">C2</option>
-              </select>
-            </div>
+            <button
+              onClick={() => setFilterOpen(!filterOpen)}
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold border transition ${
+                activeFilterCount > 0
+                  ? "bg-primary/10 text-primary border-primary/30"
+                  : "bg-white text-slate-600 border-slate-200 hover:border-slate-300"
+              }`}
+            >
+              <Filter size={15} />
+              篩選條件
+              {activeFilterCount > 0 && (
+                <span className="px-1.5 py-0.5 bg-primary text-white text-[10px] font-black rounded-full">
+                  {activeFilterCount}
+                </span>
+              )}
+            </button>
           </div>
-          <div className="p-6 grid grid-cols-1 xl:grid-cols-2 gap-6 bg-slate-50/50 flex-grow content-start">
+
+          {/* 篩選面板（收合式） */}
+          {filterOpen && (
+            <div className="border-b border-slate-100 bg-slate-50/60 px-8 py-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+                {/* 性別 */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-2">
+                    👤 性別
+                  </label>
+                  <div className="flex gap-2">
+                    {[
+                      { val: "All", label: "全部" },
+                      { val: "male", label: "男" },
+                      { val: "female", label: "女" },
+                      { val: "other", label: "其他" },
+                    ].map((g) => (
+                      <button
+                        key={g.val}
+                        onClick={() => setFilterGender(g.val)}
+                        className={`flex-1 py-2 rounded-lg text-xs font-bold border transition ${
+                          filterGender === g.val
+                            ? "bg-primary/10 text-primary border-primary/40"
+                            : "bg-white text-slate-500 border-slate-200 hover:border-slate-300"
+                        }`}
+                      >
+                        {g.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 程度 */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-2">
+                    📊 華語程度
+                  </label>
+                  <select
+                    value={filterLevel}
+                    onChange={(e) => setFilterLevel(e.target.value)}
+                    className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-primary"
+                  >
+                    <option value="All">全部程度</option>
+                    <option value="不知道 (Unknown)">不知道 (Unknown)</option>
+                    <option value="N">N (零基礎)</option>
+                    <option value="A1">A1</option>
+                    <option value="A2">A2</option>
+                    <option value="B1">B1</option>
+                    <option value="B2">B2</option>
+                    <option value="C1">C1</option>
+                    <option value="C2">C2</option>
+                  </select>
+                </div>
+
+                {/* 想加強技能 */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-2">
+                    ✏️ 想加強的技能（可複選）
+                  </label>
+                  <div className="flex gap-2 flex-wrap">
+                    {Object.entries(SKILL_MAP).map(([k, label]) => (
+                      <button
+                        key={k}
+                        onClick={() =>
+                          toggleArr(filterSkills, setFilterSkills, k)
+                        }
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition ${
+                          filterSkills.includes(k)
+                            ? "bg-orange-100 text-orange-600 border-orange-300"
+                            : "bg-white text-slate-500 border-slate-200 hover:border-orange-200"
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 上課時間 — 星期 */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-2">
+                    📅 有時間交集的星期（可複選）
+                  </label>
+                  <div className="flex gap-2">
+                    {FILTER_DAYS.map((d) => (
+                      <button
+                        key={d.id}
+                        onClick={() =>
+                          toggleArr(filterDays, setFilterDays, d.id)
+                        }
+                        className={`flex-1 py-2 rounded-lg text-xs font-bold border transition ${
+                          filterDays.includes(d.id)
+                            ? "bg-blue-100 text-blue-600 border-blue-300"
+                            : "bg-white text-slate-500 border-slate-200 hover:border-blue-200"
+                        }`}
+                      >
+                        {d.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 上課時間 — 時段 */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-2">
+                    ⏰ 有時間交集的時段（可複選）
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    {FILTER_SLOTS.map((s) => (
+                      <button
+                        key={s}
+                        onClick={() =>
+                          toggleArr(filterSlots, setFilterSlots, s)
+                        }
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition ${
+                          filterSlots.includes(s)
+                            ? "bg-blue-100 text-blue-600 border-blue-300"
+                            : "bg-white text-slate-500 border-slate-200 hover:border-blue-200"
+                        }`}
+                      >
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* 清除篩選 */}
+              {activeFilterCount > 0 && (
+                <div className="mt-4 pt-4 border-t border-slate-200 flex justify-end">
+                  <button
+                    onClick={resetFilters}
+                    className="text-xs font-bold text-slate-500 hover:text-red-500 transition flex items-center gap-1"
+                  >
+                    <X size={13} /> 清除所有篩選
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* 學生卡片列表 */}
+          <div className="p-6 grid grid-cols-1 xl:grid-cols-2 gap-6 bg-slate-50/30 flex-grow content-start">
             {filteredTutees.length > 0 ? (
               filteredTutees.map((tutee) => {
                 const skills =
@@ -911,24 +1157,40 @@ function TutorDashboard() {
                   btnState = "matched_others";
                 if (tutee.match_status === "pending")
                   btnState = "pending_others";
+
+                const genderLabel =
+                  tutee.gender === "male"
+                    ? "男 Male"
+                    : tutee.gender === "female"
+                      ? "女 Female"
+                      : tutee.gender === "other"
+                        ? "其他"
+                        : "未提供";
+
                 return (
                   <div
                     key={tutee.tutee_user_id}
                     className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm hover:shadow-md transition flex flex-col"
                   >
+                    {/* 頂部：性別 + 程度 */}
                     <div className="flex justify-between items-start mb-4 pb-4 border-b border-slate-100">
-                      <div>
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="px-2 py-0.5 bg-blue-100 text-blue-700 text-[10px] font-bold rounded uppercase tracking-wider">
-                            {tutee.nationality}
+                      <div className="flex flex-col gap-1.5">
+                        <div className="flex items-center gap-2">
+                          {/* 性別 badge */}
+                          <span
+                            className={`px-2 py-0.5 text-[10px] font-bold rounded ${
+                              tutee.gender === "female"
+                                ? "bg-pink-100 text-pink-600"
+                                : tutee.gender === "male"
+                                  ? "bg-sky-100 text-sky-600"
+                                  : "bg-slate-100 text-slate-500"
+                            }`}
+                          >
+                            {genderLabel}
                           </span>
-                          <h3 className="text-lg font-bold text-slate-800">
-                            {tutee.englishName}
-                          </h3>
                         </div>
-                        <p className="text-sm text-slate-500 font-medium">
-                          {tutee.chinese_name || "無中文名"} ({tutee.student_id}
-                          )
+                        <p className="text-xs text-slate-400 font-medium">
+                          {tutee.student_id}
                         </p>
                       </div>
                       <div className="text-right">
@@ -940,7 +1202,9 @@ function TutorDashboard() {
                         </span>
                       </div>
                     </div>
+
                     <div className="space-y-4 flex-grow">
+                      {/* 想加強的技巧 */}
                       <div>
                         <span className="text-xs font-bold text-slate-400 flex items-center mb-1.5">
                           <Award size={14} className="mr-1" /> 想加強的技巧
@@ -950,7 +1214,11 @@ function TutorDashboard() {
                             v ? (
                               <span
                                 key={k}
-                                className="px-2.5 py-1 bg-orange-50 text-orange-600 text-xs font-bold border border-orange-100 rounded-md"
+                                className={`px-2.5 py-1 text-xs font-bold border rounded-md ${
+                                  filterSkills.includes(k)
+                                    ? "bg-orange-100 text-orange-600 border-orange-300"
+                                    : "bg-orange-50 text-orange-600 border-orange-100"
+                                }`}
                               >
                                 {SKILL_MAP[k]}
                               </span>
@@ -958,6 +1226,8 @@ function TutorDashboard() {
                           )}
                         </div>
                       </div>
+
+                      {/* 希望上課時間 */}
                       <div>
                         <span className="text-xs font-bold text-slate-400 flex items-center mb-1.5">
                           <Clock size={14} className="mr-1" /> 希望上課時間
@@ -967,7 +1237,11 @@ function TutorDashboard() {
                             times.days.map((d) => (
                               <span
                                 key={d}
-                                className="px-2 py-1 bg-slate-100 text-slate-600 text-xs font-bold rounded"
+                                className={`px-2 py-1 text-xs font-bold rounded ${
+                                  filterDays.includes(d)
+                                    ? "bg-blue-100 text-blue-600"
+                                    : "bg-slate-100 text-slate-600"
+                                }`}
                               >
                                 {DAYS_MAP[d]}
                               </span>
@@ -984,7 +1258,11 @@ function TutorDashboard() {
                             times.slots.map((s) => (
                               <span
                                 key={s}
-                                className="px-2 py-1 bg-slate-100 text-slate-600 text-xs font-bold rounded"
+                                className={`px-2 py-1 text-xs font-bold rounded ${
+                                  filterSlots.includes(s)
+                                    ? "bg-blue-100 text-blue-600"
+                                    : "bg-slate-100 text-slate-600"
+                                }`}
                               >
                                 {s}
                               </span>
@@ -998,6 +1276,7 @@ function TutorDashboard() {
                         </div>
                       </div>
                     </div>
+
                     <div className="mt-6 pt-4 border-t border-slate-100 flex items-center justify-between">
                       <span className="text-xs font-bold text-slate-400">
                         學習時長：{tutee.learning_duration || "未提供"}
@@ -1036,7 +1315,15 @@ function TutorDashboard() {
             ) : (
               <div className="col-span-full py-16 text-center text-slate-400 font-bold flex flex-col items-center">
                 <Search size={48} className="mb-4 text-slate-200" />
-                目前沒有符合條件的外籍生喔！
+                目前沒有符合條件的外籍生
+                {activeFilterCount > 0 && (
+                  <button
+                    onClick={resetFilters}
+                    className="mt-4 text-sm text-primary font-bold hover:underline"
+                  >
+                    清除篩選條件試試看
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -1535,25 +1822,6 @@ function TutorDashboard() {
       return { ...r, hasSigned, hasNote, hrs, displayDate };
     });
 
-    const handleSubmitForReview = async (classId) => {
-      if (!window.confirm("確認送出此堂課的時數審查？")) return;
-      try {
-        const res = await fetch(
-          `http://localhost:3001/api/tutor/hours/submit/${classId}`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ userId: userInfo.user_id }),
-          },
-        );
-        const data = await res.json();
-        alert(data.message);
-        if (data.success) fetchHours(userInfo.user_id);
-      } catch {
-        alert("連線錯誤");
-      }
-    };
-
     const handleApplyCert = async () => {
       if (!window.confirm("確認申請實習時數證明？申請後請等待管理員審核。"))
         return;
@@ -1575,34 +1843,14 @@ function TutorDashboard() {
     };
 
     const statusBadge = (row) => {
-      if (row.review_status === "approved")
-        return (
-          <span className="px-2.5 py-1 bg-green-100 text-green-700 text-xs font-bold rounded-full flex items-center gap-1 w-fit">
-            <CheckCircle size={12} /> 已核准
-          </span>
-        );
-      if (row.review_status === "pending")
-        return (
-          <span className="px-2.5 py-1 bg-amber-100 text-amber-700 text-xs font-bold rounded-full flex items-center gap-1 w-fit">
-            <Clock size={12} /> 審查中
-          </span>
-        );
-      if (row.review_status === "rejected")
-        return (
-          <span className="px-2.5 py-1 bg-red-100 text-red-700 text-xs font-bold rounded-full flex items-center gap-1 w-fit">
-            <AlertCircle size={12} /> 未通過
-          </span>
-        );
-      // 還沒送審
+      // 簽到 + 紀錄都有 → 直接計入
       if (row.hasSigned && row.hasNote)
         return (
-          <button
-            onClick={() => handleSubmitForReview(row.class_id)}
-            className="px-2.5 py-1 bg-blue-500 text-white text-xs font-bold rounded-full hover:bg-blue-600 transition w-fit"
-          >
-            送出審查
-          </button>
+          <span className="px-2.5 py-1 bg-green-100 text-green-700 text-xs font-bold rounded-full flex items-center gap-1 w-fit">
+            <CheckCircle size={12} /> 已計入
+          </span>
         );
+      // 缺簽到或缺紀錄
       return (
         <span className="px-2.5 py-1 bg-slate-100 text-slate-500 text-xs font-bold rounded-full w-fit">
           {!row.hasSigned && !row.hasNote
@@ -1657,7 +1905,7 @@ function TutorDashboard() {
               <Award size={20} /> 輔導時數累積
             </h2>
             <p className="text-slate-300 text-sm mt-1">
-              畢業條件：累積 100 小時輔導時數（需管理員審查通過）
+              畢業條件：累積 100 小時輔導時數（完成簽到＋課堂紀錄即自動計入）
             </p>
           </div>
           <div className="p-8">

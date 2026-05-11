@@ -20,6 +20,12 @@ import {
   X,
   AlertTriangle,
   Download,
+  CheckSquare,
+  XCircle,
+  ClipboardCheck,
+  BookOpen,
+  ChevronRight,
+  BadgeCheck,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import logoImg from "./assets/csl-Logo.png";
@@ -43,12 +49,35 @@ function AdminDashboard() {
   });
   const [previewFileUrl, setPreviewFileUrl] = useState(null);
 
-  // ✨ 緊急通報相關 state
+  // 緊急通報
   const [emergencyAlerts, setEmergencyAlerts] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [alertDetailModal, setAlertDetailModal] = useState({
     isOpen: false,
     alert: null,
+  });
+
+  // ── 簽到管理相關 state ──────────────────────────────────
+  const [checkinSubTab, setCheckinSubTab] = useState("checkin-records");
+  // 一般簽到紀錄
+  const [checkinRecords, setCheckinRecords] = useState([]);
+  // 補簽到申請
+  const [makeupCheckins, setMakeupCheckins] = useState([]);
+  // 課堂紀錄
+  const [classNotes, setClassNotes] = useState([]);
+  // 補填申請
+  const [makeupNotes, setMakeupNotes] = useState([]);
+  // 待審計數
+  const [pendingCounts, setPendingCounts] = useState({
+    makeupCheckinCount: 0,
+    makeupNotesCount: 0,
+    total: 0,
+  });
+  // 詳細內容 Modal
+  const [detailModal, setDetailModal] = useState({
+    isOpen: false,
+    data: null,
+    type: "", // 'makeup-checkin' | 'makeup-notes' | 'notes'
   });
 
   const [userInfo, setUserInfo] = useState({
@@ -68,7 +97,7 @@ function AdminDashboard() {
     } else navigate("/");
   }, [navigate]);
 
-  // ✨ 撈取緊急通報
+  // 撈緊急通報
   const fetchEmergencyAlerts = () => {
     fetch("http://localhost:3001/api/admin/emergency-alerts")
       .then((res) => res.json())
@@ -77,6 +106,51 @@ function AdminDashboard() {
           setEmergencyAlerts(result.data);
           setUnreadCount(result.data.filter((a) => !a.is_read).length);
         }
+      });
+  };
+
+  // 撈待審計數
+  const fetchPendingCounts = () => {
+    fetch("http://localhost:3001/api/admin/pending-counts")
+      .then((res) => res.json())
+      .then((result) => {
+        if (result.success) setPendingCounts(result);
+      });
+  };
+
+  // 撈一般簽到紀錄
+  const fetchCheckinRecords = () => {
+    fetch("http://localhost:3001/api/admin/checkin-records")
+      .then((res) => res.json())
+      .then((result) => {
+        if (result.success) setCheckinRecords(result.data);
+      });
+  };
+
+  // 撈補簽到申請
+  const fetchMakeupCheckins = () => {
+    fetch("http://localhost:3001/api/admin/makeup-checkins")
+      .then((res) => res.json())
+      .then((result) => {
+        if (result.success) setMakeupCheckins(result.data);
+      });
+  };
+
+  // 撈課堂紀錄
+  const fetchClassNotes = () => {
+    fetch("http://localhost:3001/api/admin/class-notes")
+      .then((res) => res.json())
+      .then((result) => {
+        if (result.success) setClassNotes(result.data);
+      });
+  };
+
+  // 撈補填申請
+  const fetchMakeupNotes = () => {
+    fetch("http://localhost:3001/api/admin/makeup-notes")
+      .then((res) => res.json())
+      .then((result) => {
+        if (result.success) setMakeupNotes(result.data);
       });
   };
 
@@ -121,13 +195,25 @@ function AdminDashboard() {
     setSelectedStudent(null);
   }, [activeTab]);
 
-  // ✨ 每次進入頁面和切換 tab 都重新撈緊急通報
   useEffect(() => {
     fetchEmergencyAlerts();
-    // 每 30 秒自動更新一次
-    const interval = setInterval(fetchEmergencyAlerts, 30000);
+    fetchPendingCounts();
+    const interval = setInterval(() => {
+      fetchEmergencyAlerts();
+      fetchPendingCounts();
+    }, 30000);
     return () => clearInterval(interval);
   }, []);
+
+  // 切到簽到管理 tab 時，撈所有資料
+  useEffect(() => {
+    if (activeTab === "checkin-mgmt") {
+      fetchCheckinRecords();
+      fetchMakeupCheckins();
+      fetchClassNotes();
+      fetchMakeupNotes();
+    }
+  }, [activeTab]);
 
   useEffect(() => {
     sessionStorage.setItem("adminActiveTab", activeTab);
@@ -164,25 +250,73 @@ function AdminDashboard() {
     }
   };
 
-  // ✨ 標記緊急通報為已讀並打開詳細視窗
   const handleOpenAlert = async (alert) => {
     setAlertDetailModal({ isOpen: true, alert });
-
     if (!alert.is_read) {
       try {
         await fetch(
           `http://localhost:3001/api/admin/emergency-alerts/${alert.id}/read`,
           { method: "POST" },
         );
-        fetchEmergencyAlerts(); // 重新撈，更新未讀數
+        fetchEmergencyAlerts();
       } catch (err) {
         console.error(err);
       }
     }
   };
 
-  // 格式化時間
+  // ── 審查補簽到 ──────────────────────────────────────────
+  const handleMakeupCheckinReview = async (id, action) => {
+    const msg = action === "approved" ? "核准此補簽到申請？" : "駁回此申請？";
+    if (!window.confirm(`確認${msg}`)) return;
+    try {
+      const res = await fetch(
+        `http://localhost:3001/api/admin/makeup-checkins/${id}/review`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action }),
+        },
+      );
+      const data = await res.json();
+      alert(data.message);
+      if (data.success) {
+        fetchMakeupCheckins();
+        fetchPendingCounts();
+        setDetailModal({ isOpen: false, data: null, type: "" });
+      }
+    } catch {
+      alert("連線錯誤");
+    }
+  };
+
+  // ── 審查補填紀錄 ────────────────────────────────────────
+  const handleMakeupNotesReview = async (id, action) => {
+    const msg = action === "approved" ? "核准此補填申請？" : "駁回此申請？";
+    if (!window.confirm(`確認${msg}`)) return;
+    try {
+      const res = await fetch(
+        `http://localhost:3001/api/admin/makeup-notes/${id}/review`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action }),
+        },
+      );
+      const data = await res.json();
+      alert(data.message);
+      if (data.success) {
+        fetchMakeupNotes();
+        fetchPendingCounts();
+        setDetailModal({ isOpen: false, data: null, type: "" });
+      }
+    } catch {
+      alert("連線錯誤");
+    }
+  };
+
   const formatDateTime = (dateStr) => {
+    if (!dateStr) return "-";
     const d = new Date(dateStr);
     return d.toLocaleString("zh-TW", {
       month: "numeric",
@@ -193,6 +327,7 @@ function AdminDashboard() {
   };
 
   const formatClassDate = (dateStr) => {
+    if (!dateStr) return "-";
     const d = new Date(dateStr);
     return d.toLocaleDateString("zh-TW", {
       year: "numeric",
@@ -203,6 +338,477 @@ function AdminDashboard() {
 
   const ROLE_MAP = { tutor: "老師", tutee: "學生" };
   const TARGET_ROLE_MAP = { tutor: "老師", tutee: "學生" };
+
+  const statusBadge = (status) => {
+    if (status === "pending")
+      return (
+        <span className="px-2.5 py-1 bg-amber-100 text-amber-700 text-xs font-bold rounded-full flex items-center gap-1 w-fit">
+          <Clock size={11} /> 待審核
+        </span>
+      );
+    if (status === "approved")
+      return (
+        <span className="px-2.5 py-1 bg-green-100 text-green-700 text-xs font-bold rounded-full flex items-center gap-1 w-fit">
+          <CheckCircle size={11} /> 已核准
+        </span>
+      );
+    if (status === "rejected")
+      return (
+        <span className="px-2.5 py-1 bg-red-100 text-red-700 text-xs font-bold rounded-full flex items-center gap-1 w-fit">
+          <XCircle size={11} /> 已駁回
+        </span>
+      );
+    return null;
+  };
+
+  // ── 介面：簽到管理 ──────────────────────────────────────
+  const renderCheckinMgmt = () => {
+    const subTabs = [
+      {
+        id: "checkin-records",
+        label: "一般簽到紀錄",
+        icon: <CheckSquare size={15} />,
+        count: null,
+      },
+      {
+        id: "makeup-checkins",
+        label: "補簽到審查",
+        icon: <Clock size={15} />,
+        count: makeupCheckins.filter((m) => m.status === "pending").length,
+      },
+      {
+        id: "class-notes",
+        label: "課堂紀錄",
+        icon: <BookOpen size={15} />,
+        count: null,
+      },
+      {
+        id: "makeup-notes",
+        label: "補填紀錄審查",
+        icon: <FileText size={15} />,
+        count: makeupNotes.filter((m) => m.status === "pending").length,
+      },
+    ];
+
+    return (
+      <main className="flex-grow flex flex-col gap-4 animate-fade-in">
+        {/* Sub-tab 切換 */}
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+          <div className="flex border-b border-slate-100 overflow-x-auto">
+            {subTabs.map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setCheckinSubTab(tab.id)}
+                className={`flex items-center gap-2 px-5 py-4 text-sm font-bold whitespace-nowrap transition border-b-2 ${
+                  checkinSubTab === tab.id
+                    ? "border-primary text-primary bg-primary/5"
+                    : "border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50"
+                }`}
+              >
+                {tab.icon}
+                {tab.label}
+                {tab.count > 0 && (
+                  <span className="px-1.5 py-0.5 bg-red-500 text-white text-[10px] font-black rounded-full">
+                    {tab.count}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+
+          {/* ── 一般簽到紀錄 ── */}
+          {checkinSubTab === "checkin-records" && (
+            <div className="p-0">
+              {checkinRecords.length === 0 ? (
+                <div className="py-16 text-center text-slate-400 font-medium">
+                  尚無任何簽到紀錄
+                </div>
+              ) : (
+                <div className="divide-y divide-slate-100">
+                  <div className="hidden md:grid grid-cols-[2fr_1.5fr_1.5fr_1fr_1fr] px-6 py-3 bg-slate-50 text-xs font-bold text-slate-400 uppercase tracking-wider">
+                    <span>上課日期 / 時間</span>
+                    <span>老師</span>
+                    <span>學生</span>
+                    <span>老師簽到</span>
+                    <span>學生簽到</span>
+                  </div>
+                  {checkinRecords.map((rec) => {
+                    const [y, m, d] = rec.class_date.split("-").map(Number);
+                    const displayDate = new Date(y, m - 1, d);
+                    return (
+                      <div
+                        key={rec.class_id}
+                        className="grid grid-cols-1 md:grid-cols-[2fr_1.5fr_1.5fr_1fr_1fr] px-6 py-4 items-center gap-2 hover:bg-slate-50 transition"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 bg-slate-100 text-slate-500 rounded-xl flex flex-col items-center justify-center flex-shrink-0">
+                            <span className="text-[9px] font-bold uppercase">
+                              {displayDate.toLocaleDateString("en-US", {
+                                month: "short",
+                              })}
+                            </span>
+                            <span className="text-sm font-black leading-none">
+                              {displayDate.getDate()}
+                            </span>
+                          </div>
+                          <div>
+                            <p className="font-bold text-slate-700 text-sm">
+                              {rec.class_date}
+                            </p>
+                            <p className="text-xs text-slate-400">
+                              {rec.start_time?.substring(0, 5)} ~{" "}
+                              {rec.end_time?.substring(0, 5)}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="text-sm font-medium text-slate-700">
+                          {rec.tutor_chinese_name || rec.tutor_english_name}
+                        </div>
+                        <div className="text-sm font-medium text-slate-700">
+                          {rec.tutee_chinese_name || rec.tutee_english_name}
+                        </div>
+                        <div>
+                          {rec.tutor_signed_at ? (
+                            <div>
+                              <span className="flex items-center gap-1 text-green-600 text-xs font-bold">
+                                <CheckCircle size={13} /> 已簽到
+                              </span>
+                              <span className="text-[10px] text-slate-400">
+                                {formatDateTime(rec.tutor_signed_at)}
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="text-xs text-slate-400 font-bold">
+                              — 未簽到
+                            </span>
+                          )}
+                        </div>
+                        <div>
+                          {rec.tutee_signed_at ? (
+                            <div>
+                              <span className="flex items-center gap-1 text-green-600 text-xs font-bold">
+                                <CheckCircle size={13} /> 已簽到
+                              </span>
+                              <span className="text-[10px] text-slate-400">
+                                {formatDateTime(rec.tutee_signed_at)}
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="text-xs text-slate-400 font-bold">
+                              — 未簽到
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── 補簽到審查 ── */}
+          {checkinSubTab === "makeup-checkins" && (
+            <div className="p-0">
+              {makeupCheckins.length === 0 ? (
+                <div className="py-16 text-center text-slate-400 font-medium">
+                  尚無補簽到申請
+                </div>
+              ) : (
+                <div className="divide-y divide-slate-100">
+                  <div className="hidden md:grid grid-cols-[2fr_1.5fr_1fr_1fr_auto] px-6 py-3 bg-slate-50 text-xs font-bold text-slate-400 uppercase tracking-wider">
+                    <span>上課日期 / 時間</span>
+                    <span>申請者</span>
+                    <span>身份</span>
+                    <span>狀態</span>
+                    <span>操作</span>
+                  </div>
+                  {makeupCheckins.map((item) => {
+                    const [y, m, d] = item.class_date.split("-").map(Number);
+                    const displayDate = new Date(y, m - 1, d);
+                    return (
+                      <div
+                        key={item.id}
+                        className={`grid grid-cols-1 md:grid-cols-[2fr_1.5fr_1fr_1fr_auto] px-6 py-4 items-center gap-3 transition ${
+                          item.status === "pending"
+                            ? "bg-amber-50/30 hover:bg-amber-50"
+                            : "hover:bg-slate-50"
+                        }`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div
+                            className={`w-10 h-10 rounded-xl flex flex-col items-center justify-center flex-shrink-0 ${
+                              item.status === "pending"
+                                ? "bg-amber-100 text-amber-700"
+                                : "bg-slate-100 text-slate-500"
+                            }`}
+                          >
+                            <span className="text-[9px] font-bold uppercase">
+                              {displayDate.toLocaleDateString("en-US", {
+                                month: "short",
+                              })}
+                            </span>
+                            <span className="text-sm font-black leading-none">
+                              {displayDate.getDate()}
+                            </span>
+                          </div>
+                          <div>
+                            <p className="font-bold text-slate-700 text-sm">
+                              {item.class_date}
+                            </p>
+                            <p className="text-xs text-slate-400">
+                              {item.start_time?.substring(0, 5)} ~{" "}
+                              {item.end_time?.substring(0, 5)}
+                            </p>
+                          </div>
+                        </div>
+                        <div>
+                          <p className="font-bold text-slate-700 text-sm">
+                            {item.chinese_name || item.english_name}
+                          </p>
+                          <p className="text-xs text-slate-400">
+                            申請時間：{formatDateTime(item.created_at)}
+                          </p>
+                        </div>
+                        <div className="text-sm font-bold text-slate-600">
+                          {ROLE_MAP[item.role]}
+                        </div>
+                        <div>{statusBadge(item.status)}</div>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() =>
+                              setDetailModal({
+                                isOpen: true,
+                                data: item,
+                                type: "makeup-checkin",
+                              })
+                            }
+                            className="px-3 py-1.5 bg-slate-100 text-slate-600 text-xs font-bold rounded-lg hover:bg-slate-200 transition flex items-center gap-1"
+                          >
+                            <Eye size={13} /> 查看
+                          </button>
+                          {item.status === "pending" && (
+                            <>
+                              <button
+                                onClick={() =>
+                                  handleMakeupCheckinReview(item.id, "approved")
+                                }
+                                className="px-3 py-1.5 bg-green-500 text-white text-xs font-bold rounded-lg hover:bg-green-600 transition"
+                              >
+                                核准
+                              </button>
+                              <button
+                                onClick={() =>
+                                  handleMakeupCheckinReview(item.id, "rejected")
+                                }
+                                className="px-3 py-1.5 bg-red-100 text-red-600 text-xs font-bold rounded-lg hover:bg-red-200 transition"
+                              >
+                                駁回
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── 課堂紀錄 ── */}
+          {checkinSubTab === "class-notes" && (
+            <div className="p-0">
+              {classNotes.length === 0 ? (
+                <div className="py-16 text-center text-slate-400 font-medium">
+                  尚無課堂紀錄
+                </div>
+              ) : (
+                <div className="divide-y divide-slate-100">
+                  <div className="hidden md:grid grid-cols-[2fr_1.5fr_1fr_1fr_auto] px-6 py-3 bg-slate-50 text-xs font-bold text-slate-400 uppercase tracking-wider">
+                    <span>上課日期 / 時間</span>
+                    <span>填寫者</span>
+                    <span>身份</span>
+                    <span>填寫時間</span>
+                    <span>查看</span>
+                  </div>
+                  {classNotes.map((note) => {
+                    const [y, m, d] = note.class_date.split("-").map(Number);
+                    const displayDate = new Date(y, m - 1, d);
+                    return (
+                      <div
+                        key={note.id}
+                        className="grid grid-cols-1 md:grid-cols-[2fr_1.5fr_1fr_1fr_auto] px-6 py-4 items-center gap-3 hover:bg-slate-50 transition"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 bg-slate-100 text-slate-500 rounded-xl flex flex-col items-center justify-center flex-shrink-0">
+                            <span className="text-[9px] font-bold uppercase">
+                              {displayDate.toLocaleDateString("en-US", {
+                                month: "short",
+                              })}
+                            </span>
+                            <span className="text-sm font-black leading-none">
+                              {displayDate.getDate()}
+                            </span>
+                          </div>
+                          <div>
+                            <p className="font-bold text-slate-700 text-sm">
+                              {note.class_date}
+                            </p>
+                            <p className="text-xs text-slate-400">
+                              {note.start_time?.substring(0, 5)} ~{" "}
+                              {note.end_time?.substring(0, 5)}
+                            </p>
+                          </div>
+                        </div>
+                        <div>
+                          <p className="font-bold text-slate-700 text-sm">
+                            {note.chinese_name || note.english_name}
+                          </p>
+                          <p className="text-xs text-slate-400">
+                            {note.student_id}
+                          </p>
+                        </div>
+                        <div className="text-sm font-bold text-slate-600">
+                          {ROLE_MAP[note.role]}
+                        </div>
+                        <div className="text-xs text-slate-500">
+                          {formatDateTime(note.updated_at)}
+                        </div>
+                        <div>
+                          <button
+                            onClick={() =>
+                              setDetailModal({
+                                isOpen: true,
+                                data: note,
+                                type: "notes",
+                              })
+                            }
+                            className="px-3 py-1.5 bg-slate-100 text-slate-600 text-xs font-bold rounded-lg hover:bg-slate-200 transition flex items-center gap-1"
+                          >
+                            <Eye size={13} /> 查看
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── 補填紀錄審查 ── */}
+          {checkinSubTab === "makeup-notes" && (
+            <div className="p-0">
+              {makeupNotes.length === 0 ? (
+                <div className="py-16 text-center text-slate-400 font-medium">
+                  尚無補填申請
+                </div>
+              ) : (
+                <div className="divide-y divide-slate-100">
+                  <div className="hidden md:grid grid-cols-[2fr_1.5fr_1fr_1fr_auto] px-6 py-3 bg-slate-50 text-xs font-bold text-slate-400 uppercase tracking-wider">
+                    <span>上課日期 / 時間</span>
+                    <span>申請者</span>
+                    <span>身份</span>
+                    <span>狀態</span>
+                    <span>操作</span>
+                  </div>
+                  {makeupNotes.map((item) => {
+                    const [y, m, d] = item.class_date.split("-").map(Number);
+                    const displayDate = new Date(y, m - 1, d);
+                    return (
+                      <div
+                        key={item.id}
+                        className={`grid grid-cols-1 md:grid-cols-[2fr_1.5fr_1fr_1fr_auto] px-6 py-4 items-center gap-3 transition ${
+                          item.status === "pending"
+                            ? "bg-amber-50/30 hover:bg-amber-50"
+                            : "hover:bg-slate-50"
+                        }`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div
+                            className={`w-10 h-10 rounded-xl flex flex-col items-center justify-center flex-shrink-0 ${
+                              item.status === "pending"
+                                ? "bg-amber-100 text-amber-700"
+                                : "bg-slate-100 text-slate-500"
+                            }`}
+                          >
+                            <span className="text-[9px] font-bold uppercase">
+                              {displayDate.toLocaleDateString("en-US", {
+                                month: "short",
+                              })}
+                            </span>
+                            <span className="text-sm font-black leading-none">
+                              {displayDate.getDate()}
+                            </span>
+                          </div>
+                          <div>
+                            <p className="font-bold text-slate-700 text-sm">
+                              {item.class_date}
+                            </p>
+                            <p className="text-xs text-slate-400">
+                              {item.start_time?.substring(0, 5)} ~{" "}
+                              {item.end_time?.substring(0, 5)}
+                            </p>
+                          </div>
+                        </div>
+                        <div>
+                          <p className="font-bold text-slate-700 text-sm">
+                            {item.chinese_name || item.english_name}
+                          </p>
+                          <p className="text-xs text-slate-400">
+                            申請時間：{formatDateTime(item.created_at)}
+                          </p>
+                        </div>
+                        <div className="text-sm font-bold text-slate-600">
+                          {ROLE_MAP[item.role]}
+                        </div>
+                        <div>{statusBadge(item.status)}</div>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() =>
+                              setDetailModal({
+                                isOpen: true,
+                                data: item,
+                                type: "makeup-notes",
+                              })
+                            }
+                            className="px-3 py-1.5 bg-slate-100 text-slate-600 text-xs font-bold rounded-lg hover:bg-slate-200 transition flex items-center gap-1"
+                          >
+                            <Eye size={13} /> 查看
+                          </button>
+                          {item.status === "pending" && (
+                            <>
+                              <button
+                                onClick={() =>
+                                  handleMakeupNotesReview(item.id, "approved")
+                                }
+                                className="px-3 py-1.5 bg-green-500 text-white text-xs font-bold rounded-lg hover:bg-green-600 transition"
+                              >
+                                核准
+                              </button>
+                              <button
+                                onClick={() =>
+                                  handleMakeupNotesReview(item.id, "rejected")
+                                }
+                                className="px-3 py-1.5 bg-red-100 text-red-600 text-xs font-bold rounded-lg hover:bg-red-200 transition"
+                              >
+                                駁回
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </main>
+    );
+  };
 
   // --- 介面：緊急通報列表 ---
   const renderEmergencyAlerts = () => (
@@ -237,7 +843,6 @@ function AdminDashboard() {
                 }`}
               >
                 <div className="flex items-center gap-3">
-                  {/* 未讀紅點 */}
                   <div
                     className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${!alert.is_read ? "bg-red-500" : "bg-slate-300"}`}
                   />
@@ -287,7 +892,7 @@ function AdminDashboard() {
   const renderHomeDashboard = () => (
     <>
       <main className="flex-grow flex flex-col gap-6">
-        {/* ✨ 緊急通報預覽（只顯示未讀的） */}
+        {/* 緊急通報預覽 */}
         {unreadCount > 0 && (
           <div className="bg-white rounded-2xl shadow-sm border border-red-200 overflow-hidden">
             <div className="bg-red-50 px-6 py-4 border-b border-red-100 flex justify-between items-center">
@@ -329,7 +934,59 @@ function AdminDashboard() {
           </div>
         )}
 
-        {/* 待審資料 */}
+        {/* 補申請待審預覽 */}
+        {pendingCounts.total > 0 && (
+          <div className="bg-white rounded-2xl shadow-sm border border-amber-200 overflow-hidden">
+            <div className="bg-amber-50 px-6 py-4 border-b border-amber-100 flex justify-between items-center">
+              <h2 className="font-bold text-amber-700 flex items-center gap-2">
+                <Clock size={18} />
+                待審核申請（{pendingCounts.total} 件）
+              </h2>
+              <button
+                onClick={() => setActiveTab("checkin-mgmt")}
+                className="text-xs text-amber-600 hover:underline font-bold"
+              >
+                前往審查 →
+              </button>
+            </div>
+            <div className="p-5 flex gap-4">
+              {pendingCounts.makeupCheckinCount > 0 && (
+                <div
+                  onClick={() => {
+                    setActiveTab("checkin-mgmt");
+                    setCheckinSubTab("makeup-checkins");
+                  }}
+                  className="flex-1 p-4 bg-amber-50 border border-amber-100 rounded-xl cursor-pointer hover:shadow-md transition"
+                >
+                  <p className="text-3xl font-black text-amber-600">
+                    {pendingCounts.makeupCheckinCount}
+                  </p>
+                  <p className="text-sm font-bold text-amber-700 mt-1">
+                    補簽到待審
+                  </p>
+                </div>
+              )}
+              {pendingCounts.makeupNotesCount > 0 && (
+                <div
+                  onClick={() => {
+                    setActiveTab("checkin-mgmt");
+                    setCheckinSubTab("makeup-notes");
+                  }}
+                  className="flex-1 p-4 bg-blue-50 border border-blue-100 rounded-xl cursor-pointer hover:shadow-md transition"
+                >
+                  <p className="text-3xl font-black text-blue-600">
+                    {pendingCounts.makeupNotesCount}
+                  </p>
+                  <p className="text-sm font-bold text-blue-700 mt-1">
+                    補填紀錄待審
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* 資格證明待審 */}
         <div className="bg-white rounded-2xl shadow-sm border border-orange-100 overflow-hidden">
           <div className="bg-orange-50 px-6 py-4 border-b border-orange-100 flex justify-between items-center">
             <h2 className="font-bold text-orange-700 flex items-center">
@@ -441,7 +1098,7 @@ function AdminDashboard() {
         </div>
       </aside>
 
-      {/* 審查 Modal */}
+      {/* 資格審查 Modal */}
       {reviewModal.isOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-fade-in">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
@@ -524,9 +1181,6 @@ function AdminDashboard() {
                 </span>
               </div>
             </div>
-            <h4 className="font-bold text-slate-700 mb-4 flex items-center">
-              <User size={18} className="mr-2 text-primary" /> 所有資料紀錄
-            </h4>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {Object.entries(selectedStudent).map(([key, value]) => {
                 if (key === "certification_file" && value) {
@@ -607,14 +1261,12 @@ function AdminDashboard() {
             <button
               onClick={() => setViewMode("list")}
               className={`p-1.5 rounded-md transition ${viewMode === "list" ? "bg-primary/10 text-primary" : "text-slate-400 hover:bg-slate-50"}`}
-              title="列表檢視"
             >
               <List size={18} />
             </button>
             <button
               onClick={() => setViewMode("grid")}
               className={`p-1.5 rounded-md transition ${viewMode === "grid" ? "bg-primary/10 text-primary" : "text-slate-400 hover:bg-slate-50"}`}
-              title="網格檢視"
             >
               <LayoutGrid size={18} />
             </button>
@@ -714,7 +1366,6 @@ function AdminDashboard() {
             />
           </div>
 
-          {/* ✨ Bell 圖示：顯示未讀數量 */}
           <button
             onClick={() => setActiveTab("emergency")}
             className="relative text-slate-400 hover:text-red-500 transition"
@@ -790,6 +1441,28 @@ function AdminDashboard() {
                 />{" "}
                 外籍生
               </li>
+              {/* ── 新增：簽到管理 ── */}
+              <li
+                onClick={() => setActiveTab("checkin-mgmt")}
+                className={`flex items-center p-3 rounded-xl cursor-pointer transition ${activeTab === "checkin-mgmt" ? "bg-purple-50 text-purple-600 font-bold" : "hover:bg-slate-50"}`}
+              >
+                <div className="relative mr-4">
+                  <ClipboardCheck
+                    size={20}
+                    className={
+                      activeTab === "checkin-mgmt"
+                        ? "text-purple-600"
+                        : "text-slate-400"
+                    }
+                  />
+                  {pendingCounts.total > 0 && (
+                    <span className="absolute -top-1.5 -right-1.5 w-3.5 h-3.5 bg-amber-500 text-white text-[9px] font-black rounded-full flex items-center justify-center">
+                      {pendingCounts.total > 9 ? "9+" : pendingCounts.total}
+                    </span>
+                  )}
+                </div>
+                簽到管理
+              </li>
               <li
                 onClick={() => setActiveTab("emergency")}
                 className={`flex items-center p-3 rounded-xl cursor-pointer transition ${activeTab === "emergency" ? "bg-red-50 text-red-600 font-bold" : "hover:bg-slate-50"}`}
@@ -822,10 +1495,194 @@ function AdminDashboard() {
           ? renderHomeDashboard()
           : activeTab === "emergency"
             ? renderEmergencyAlerts()
-            : renderStudentDirectory()}
+            : activeTab === "checkin-mgmt"
+              ? renderCheckinMgmt()
+              : renderStudentDirectory()}
       </div>
 
-      {/* ✨ 緊急通報詳細視窗 */}
+      {/* 詳細內容 Modal（補簽到 / 補填 / 課堂紀錄） */}
+      {detailModal.isOpen && detailModal.data && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="flex justify-between items-center px-6 py-4 border-b border-slate-100 bg-slate-50 flex-shrink-0">
+              <h3 className="font-bold text-lg text-slate-800">
+                {detailModal.type === "makeup-checkin"
+                  ? "補簽到申請詳情"
+                  : detailModal.type === "makeup-notes"
+                    ? "補填紀錄申請詳情"
+                    : "課堂紀錄詳情"}
+              </h3>
+              <button
+                onClick={() =>
+                  setDetailModal({ isOpen: false, data: null, type: "" })
+                }
+                className="text-slate-400 hover:text-red-500"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            <div className="p-6 space-y-4 overflow-y-auto flex-grow">
+              {/* 共用欄位 */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="bg-slate-50 p-3 rounded-xl">
+                  <span className="text-xs font-bold text-slate-400 block mb-1">
+                    申請者
+                  </span>
+                  <span className="font-bold text-slate-700 text-sm">
+                    {detailModal.data.chinese_name ||
+                      detailModal.data.english_name}
+                  </span>
+                </div>
+                <div className="bg-slate-50 p-3 rounded-xl">
+                  <span className="text-xs font-bold text-slate-400 block mb-1">
+                    身份
+                  </span>
+                  <span className="font-bold text-slate-700 text-sm">
+                    {ROLE_MAP[detailModal.data.role]}
+                  </span>
+                </div>
+                <div className="bg-slate-50 p-3 rounded-xl">
+                  <span className="text-xs font-bold text-slate-400 block mb-1">
+                    上課日期
+                  </span>
+                  <span className="font-bold text-slate-700 text-sm">
+                    {detailModal.data.class_date}
+                  </span>
+                </div>
+                <div className="bg-slate-50 p-3 rounded-xl">
+                  <span className="text-xs font-bold text-slate-400 block mb-1">
+                    上課時間
+                  </span>
+                  <span className="font-bold text-slate-700 text-sm">
+                    {detailModal.data.start_time?.substring(0, 5)} ~{" "}
+                    {detailModal.data.end_time?.substring(0, 5)}
+                  </span>
+                </div>
+              </div>
+
+              {/* 補簽到：說明原因 */}
+              {detailModal.type === "makeup-checkin" && (
+                <div>
+                  <span className="text-xs font-bold text-slate-400 block mb-2">
+                    說明原因
+                  </span>
+                  <div className="bg-slate-50 p-4 rounded-xl text-sm text-slate-700 leading-relaxed border border-slate-100">
+                    {detailModal.data.reason || "（未填寫）"}
+                  </div>
+                </div>
+              )}
+
+              {/* 課堂紀錄 / 補填：地點＋內容＋備註 */}
+              {(detailModal.type === "notes" ||
+                detailModal.type === "makeup-notes") && (
+                <>
+                  {detailModal.data.location && (
+                    <div>
+                      <span className="text-xs font-bold text-slate-400 block mb-2">
+                        上課地點
+                      </span>
+                      <div className="bg-slate-50 p-3 rounded-xl text-sm text-slate-700 border border-slate-100">
+                        {detailModal.data.location}
+                      </div>
+                    </div>
+                  )}
+                  <div>
+                    <span className="text-xs font-bold text-slate-400 block mb-2">
+                      上課內容
+                    </span>
+                    <div className="bg-slate-50 p-4 rounded-xl text-sm text-slate-700 leading-relaxed border border-slate-100">
+                      {detailModal.data.content || "（未填寫）"}
+                    </div>
+                  </div>
+                  {detailModal.data.remarks && (
+                    <div>
+                      <span className="text-xs font-bold text-slate-400 block mb-2">
+                        備註
+                      </span>
+                      <div className="bg-slate-50 p-3 rounded-xl text-sm text-slate-700 border border-slate-100">
+                        {detailModal.data.remarks}
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {/* 附件 */}
+              {detailModal.data.attachment_file && (
+                <div>
+                  <span className="text-xs font-bold text-slate-400 block mb-2">
+                    附件
+                  </span>
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() =>
+                        setPreviewFileUrl(
+                          `http://localhost:3001/uploads/${detailModal.data.attachment_file}`,
+                        )
+                      }
+                      className="flex items-center bg-blue-100 text-blue-700 px-4 py-2 rounded-lg text-sm font-bold hover:bg-blue-200 transition"
+                    >
+                      <Eye size={15} className="mr-1.5" /> 預覽
+                    </button>
+                    <span className="text-sm text-slate-500 truncate">
+                      {detailModal.data.attachment_file}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* 狀態 */}
+              <div className="flex items-center gap-3 pt-2 border-t border-slate-100">
+                <span className="text-xs font-bold text-slate-400">狀態：</span>
+                {statusBadge(detailModal.data.status)}
+              </div>
+            </div>
+
+            {/* 審查按鈕（只有補申請 + pending 才顯示） */}
+            {detailModal.data.status === "pending" &&
+              detailModal.type !== "notes" && (
+                <div className="px-6 pb-6 flex gap-3 flex-shrink-0">
+                  <button
+                    onClick={() => {
+                      if (detailModal.type === "makeup-checkin")
+                        handleMakeupCheckinReview(
+                          detailModal.data.id,
+                          "rejected",
+                        );
+                      else
+                        handleMakeupNotesReview(
+                          detailModal.data.id,
+                          "rejected",
+                        );
+                    }}
+                    className="flex-1 py-2.5 bg-red-50 text-red-600 font-bold rounded-xl hover:bg-red-100 transition border border-red-200"
+                  >
+                    駁回申請
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (detailModal.type === "makeup-checkin")
+                        handleMakeupCheckinReview(
+                          detailModal.data.id,
+                          "approved",
+                        );
+                      else
+                        handleMakeupNotesReview(
+                          detailModal.data.id,
+                          "approved",
+                        );
+                    }}
+                    className="flex-1 py-2.5 bg-green-500 text-white font-bold rounded-xl hover:bg-green-600 transition shadow-sm"
+                  >
+                    ✅ 核准申請
+                  </button>
+                </div>
+              )}
+          </div>
+        </div>
+      )}
+
+      {/* 緊急通報詳細視窗 */}
       {alertDetailModal.isOpen && alertDetailModal.alert && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
