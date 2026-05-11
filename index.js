@@ -12,6 +12,15 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// ... 現有的 require 語句
+const {
+  authMiddleware,
+  roleMiddleware,
+  adminOnly,
+  tutorOrAdmin,
+  tuteeOrAdmin,
+} = require("./middleware/auth");
+
 if (!fs.existsSync("./uploads")) {
   fs.mkdirSync("./uploads");
 }
@@ -70,36 +79,192 @@ app.get("/api/users", async (req, res) => {
 });
 
 // 🚀 第二支 API：登入驗證 (POST)
-app.post("/api/login", async (req, res) => {
+// =============== 新的登入端點（雙令牌系統）===============
+app.post("/api/auth/login", async (req, res) => {
   const { account, password } = req.body;
+
+  // ✅ 1. 輸入驗證
+  if (!account || !password) {
+    return res.status(400).json({
+      success: false,
+      message: "請提供帳號和密碼",
+    });
+  }
+
   try {
+    // ✅ 2. 查詢用戶
     const result = await pool.query("SELECT * FROM users WHERE account = $1", [
       account,
     ]);
-    if (result.rows.length === 0)
-      return res
-        .status(401)
-        .json({ success: false, message: "找不到此帳號，請確認是否輸入正確" });
+
+    if (result.rows.length === 0) {
+      // ⚠️ 安全提示：不要透露帳號是否存在
+      return res.status(401).json({
+        success: false,
+        message: "帳號或密碼錯誤",
+      });
+    }
 
     const user = result.rows[0];
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch)
-      return res.status(401).json({ success: false, message: "密碼錯誤" });
 
-    const token = jwt.sign(
-      { id: user.id, account: user.account, role: user.role },
-      JWT_SECRET,
-      { expiresIn: "1d" },
+    // ✅ 3. 驗證密碼
+    const isPasswordValid = await bcrypt.compare(password, user.password);
+
+    if (!isPasswordValid) {
+      return res.status(401).json({
+        success: false,
+        message: "帳號或密碼錯誤",
+      });
+    }
+
+    // ✅ 4. 生成 Access Token (短期)
+    const accessToken = jwt.sign(
+      {
+        id: user.id,
+        account: user.account,
+        role: user.role,
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: process.env.JWT_EXPIRY || "7d" },
+    );
+
+    // ✅ 5. 生成 Refresh Token (長期)
+    const refreshToken = jwt.sign(
+      { id: user.id },
+      process.env.JWT_REFRESH_SECRET,
+      { expiresIn: process.env.REFRESH_TOKEN_EXPIRY || "30d" },
+    );
+
+    // ✅ 6. 存儲 Refresh Token 到數據庫
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + 30); // 30天後過期
+
+    await pool.query(
+      `INSERT INTO refresh_tokens (user_id, token, expires_at) 
+       VALUES ($1, $2, $3)`,
+      [user.id, refreshToken, expiresAt],
+    );
+
+    // ✅ 7. 返回令牌
+    res.json({
+      success: true,
+      message: "登入成功",
+      data: {
+        accessToken,
+        refreshToken,
+        user: {
+          id: user.id,
+          account: user.account,
+          name: user.chinese_name,
+          role: user.role,
+        },
+      },
+    });
+  } catch (error) {
+    console.error("登入錯誤:", error);
+    res.status(500).json({
+      success: false,
+      message: "伺服器發生錯誤",
+    });
+  }
+});
+
+// =============== 新增：刷新令牌端點 ===============
+app.post("/api/auth/refresh", async (req, res) => {
+  const { refreshToken } = req.body;
+
+  if (!refreshToken) {
+    return res.status(400).json({
+      success: false,
+      message: "未提供 Refresh Token",
+    });
+  }
+
+  try {
+    // ✅ 1. 驗證 Refresh Token 的簽名
+    const decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET);
+
+    // ✅ 2. 檢查 Refresh Token 是否存在於數據庫
+    const tokenResult = await pool.query(
+      `SELECT * FROM refresh_tokens 
+       WHERE token = $1 AND revoked_at IS NULL 
+       AND expires_at > NOW()`,
+      [refreshToken],
+    );
+
+    if (tokenResult.rows.length === 0) {
+      return res.status(401).json({
+        success: false,
+        message: "Refresh Token 無效或已過期",
+      });
+    }
+
+    // ✅ 3. 查詢用戶信息
+    const userResult = await pool.query("SELECT * FROM users WHERE id = $1", [
+      decoded.id,
+    ]);
+
+    if (userResult.rows.length === 0) {
+      return res.status(401).json({
+        success: false,
+        message: "用戶不存在",
+      });
+    }
+
+    const user = userResult.rows[0];
+
+    // ✅ 4. 生成新的 Access Token
+    const newAccessToken = jwt.sign(
+      {
+        id: user.id,
+        account: user.account,
+        role: user.role,
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: process.env.JWT_EXPIRY || "7d" },
     );
 
     res.json({
       success: true,
-      message: "登入成功！",
-      data: { name: user.chinese_name, role: user.role, token },
+      message: "令牌已刷新",
+      data: {
+        accessToken: newAccessToken,
+      },
     });
   } catch (error) {
-    console.error("登入發生錯誤:", error);
-    res.status(500).json({ success: false, message: "伺服器發生錯誤" });
+    console.error("刷新令牌錯誤:", error);
+    res.status(401).json({
+      success: false,
+      message: "Refresh Token 無效",
+    });
+  }
+});
+
+// =============== 新增：登出端點 ===============
+app.post("/api/auth/logout", authMiddleware, async (req, res) => {
+  const { refreshToken } = req.body;
+
+  try {
+    if (refreshToken) {
+      // ✅ 撤銷 Refresh Token (軟刪除)
+      await pool.query(
+        `UPDATE refresh_tokens 
+         SET revoked_at = NOW() 
+         WHERE token = $1`,
+        [refreshToken],
+      );
+    }
+
+    res.json({
+      success: true,
+      message: "已登出",
+    });
+  } catch (error) {
+    console.error("登出錯誤:", error);
+    res.status(500).json({
+      success: false,
+      message: "伺服器發生錯誤",
+    });
   }
 });
 
@@ -231,8 +396,16 @@ app.get("/api/user/:account", async (req, res) => {
 });
 
 // 🚀 第六支 API：獲取使用者完整個人資訊 (GET)
-app.get("/api/profile/:account", async (req, res) => {
+app.get("/api/profile/:account", authMiddleware, async (req, res) => {
   try {
+    // ⚠️ 安全檢查：只允許用戶訪問自己的個人資料，或讓管理員訪問任何人的
+    if (req.user.role !== "admin" && req.user.account !== req.params.account) {
+      return res.status(403).json({
+        success: false,
+        message: "無權訪問此資料",
+      });
+    }
+
     const result = await pool.query(
       `SELECT 
         u.id as user_id,
@@ -262,7 +435,7 @@ app.get("/api/profile/:account", async (req, res) => {
       res.status(404).json({ success: false, message: "找不到使用者" });
     }
   } catch (error) {
-    console.error("獲取完整個人資訊失敗:", error);
+    console.error("獲取個人資料失敗:", error);
     res.status(500).json({ success: false, message: "伺服器發生錯誤" });
   }
 });
