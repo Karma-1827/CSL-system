@@ -142,6 +142,7 @@ app.post("/api/tutee-profile", async (req, res) => {
   const {
     originalStudentId,
     studentId,
+    gender,
     studentType,
     chineseName,
     englishName,
@@ -200,6 +201,7 @@ app.post("/api/tutee-profile", async (req, res) => {
         skillsToImprove,
         JSON.stringify(preferredTimeSlots),
         learningDuration,
+        gender,
       ],
     );
 
@@ -241,6 +243,7 @@ app.get("/api/profile/:account", async (req, res) => {
         COALESCE(p.department, t.department) as department,
         COALESCE(p.phone, t.phone) as phone,
         COALESCE(p.nationality, t.nationality) as nationality,
+        COALESCE(p.gender, t.gender) as gender,
         p.overall_level, p.learning_duration,
         COALESCE(p.level_listening, t.level_listening) as level_listening,
         COALESCE(p.level_speaking, t.level_speaking) as level_speaking,
@@ -274,6 +277,7 @@ app.post(
   async (req, res) => {
     const {
       studentId,
+      gender,
       chineseName,
       englishName,
       studentStatus,
@@ -326,6 +330,7 @@ app.post(
           teachingNotes,
           availableTimes,
           certificationFileName,
+          gender,
         ],
       );
 
@@ -444,6 +449,7 @@ app.get("/api/match/tutees", async (req, res) => {
         u.id as tutee_user_id, u.student_id, u.chinese_name, u.english_name,
         p.nationality, p.learning_duration, p.overall_level, 
         p.target_skills, p.available_times, p.skills_to_improve,
+        p.gender, 
         m.status as match_status, m.tutor_id as matched_tutor_id
       FROM users u
       JOIN tutee_profiles p ON u.id = p.user_id
