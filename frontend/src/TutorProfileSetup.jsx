@@ -267,9 +267,9 @@ function TutorProfileSetup() {
                 </label>
                 <div className="flex gap-3">
                   {[
-                    { val: "male", label: "男 Male" },
-                    { val: "female", label: "女 Female" },
-                    { val: "other", label: "非二元性別 Non-binary" },
+                    { val: "male", label: "男性" },
+                    { val: "female", label: "女性" },
+                    { val: "other", label: "非二元性別" },
                   ].map((g) => (
                     <label key={g.val} className="flex-1 cursor-pointer">
                       <input

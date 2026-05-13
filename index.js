@@ -1663,3 +1663,56 @@ app.get("/api/admin/pending-counts", async (req, res) => {
     res.status(500).json({ success: false });
   }
 });
+
+app.put("/api/profile/:account", async (req, res) => {
+  const { account } = req.params;
+  const {
+    chineseName,
+    englishName,
+    department,
+    phone,
+    email,
+    nationality,
+    gender,
+  } = req.body;
+
+  try {
+    const userRes = await pool.query(
+      "SELECT id, role FROM users WHERE account = $1",
+      [account],
+    );
+    if (userRes.rows.length === 0)
+      return res.status(404).json({ success: false, message: "找不到使用者" });
+
+    const userId = userRes.rows[0].id;
+    const role = userRes.rows[0].role;
+
+    // 更新 users 表的姓名和 email
+    await pool.query(
+      "UPDATE users SET chinese_name = $1, english_name = $2, email = $3 WHERE id = $4",
+      [chineseName, englishName, email, userId],
+    );
+
+    // 依角色更新對應 profile 表
+    if (role === "tutor") {
+      await pool.query(
+        `UPDATE tutor_profiles 
+         SET department = $1, phone = $2, nationality = $3, gender = $4
+         WHERE user_id = $5`,
+        [department, phone, nationality, gender, userId],
+      );
+    } else if (role === "tutee") {
+      await pool.query(
+        `UPDATE tutee_profiles 
+         SET department = $1, phone = $2, nationality = $3, gender = $4
+         WHERE user_id = $5`,
+        [department, phone, nationality, gender, userId],
+      );
+    }
+
+    res.json({ success: true, message: "個人資料已更新！" });
+  } catch (error) {
+    console.error("更新個人資料失敗:", error);
+    res.status(500).json({ success: false, message: "伺服器發生錯誤" });
+  }
+});
