@@ -619,7 +619,6 @@ function TuteeDashboard() {
                 );
               }
             })()}
-
             {/* 學生簽到（動態按鈕） */}
             {renderCheckinButton()}
 
@@ -725,6 +724,18 @@ function TuteeDashboard() {
                 </h4>
                 <p className="font-bold text-slate-800 text-lg mb-4">
                   {matchedTutor.chinese_name || "未提供"}
+                </p>
+                <h4 className="text-sm font-bold text-slate-400 mb-1">
+                  性別 Gender
+                </h4>
+                <p className="font-medium text-slate-700 mb-4">
+                  {matchedTutor.gender === "male"
+                    ? "男 Male"
+                    : matchedTutor.gender === "female"
+                      ? "女 Female"
+                      : matchedTutor.gender === "other"
+                        ? "非二元性別 Non-binary"
+                        : "未提供"}
                 </p>
                 <h4 className="text-sm font-bold text-slate-400 mb-1">
                   身分別 / 系所 Status & Department

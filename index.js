@@ -315,7 +315,7 @@ app.post(
         `INSERT INTO tutor_profiles 
       (user_id, student_status, program, nationality, department, phone, 
        level_listening, level_speaking, level_reading, level_writing, teaching_notes, available_times, certification_file) 
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
         [
           userId,
           studentStatus,
@@ -577,8 +577,8 @@ app.get("/api/match/tutor-info/:tutorId", async (req, res) => {
   try {
     const result = await pool.query(
       `
-      SELECT u.chinese_name, u.english_name, u.email, 
-             t.student_status, t.department, t.teaching_notes, t.available_times
+      SELECT user_id, u.chinese_name, u.english_name, u.email, 
+             t.student_status, t.department, t.teaching_notes, t.available_times, t.gender
       FROM users u
       JOIN tutor_profiles t ON u.id = t.user_id
       WHERE u.id = $1
@@ -596,9 +596,9 @@ app.get("/api/match/tutee-info/:tuteeId", async (req, res) => {
   try {
     const result = await pool.query(
       `
-      SELECT u.chinese_name, u.english_name, u.email, u.student_id,
+      SELECT user_id, u.chinese_name, u.english_name, u.email, u.student_id,
              p.nationality, p.department, p.learning_duration, p.overall_level,
-             p.target_skills, p.skills_to_improve, p.available_times
+             p.target_skills, p.skills_to_improve, p.available_times, p.gender
       FROM users u
       JOIN tutee_profiles p ON u.id = p.user_id
       WHERE u.id = $1
@@ -1714,5 +1714,203 @@ app.put("/api/profile/:account", async (req, res) => {
   } catch (error) {
     console.error("更新個人資料失敗:", error);
     res.status(500).json({ success: false, message: "伺服器發生錯誤" });
+  }
+});
+
+const handleSave = async (section) => {
+  try {
+    const res = await fetch("http://localhost:3001/api/profile/update", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        account: userInfo.account,
+        chineseName: editForm.chineseName,
+        englishName: editForm.englishName,
+        department: editForm.department,
+        phone: editForm.phone,
+        email: editForm.email,
+        nationality: editForm.nationality,
+        gender: editForm.gender,
+        levelListening: editForm.levelListening,
+        levelSpeaking: editForm.levelSpeaking,
+        levelReading: editForm.levelReading,
+        levelWriting: editForm.levelWriting,
+        teachingNotes: editForm.teachingNotes,
+        availableTimes: editForm.availableTimes,
+        overallLevel: editForm.overallLevel,
+        learningDuration: editForm.learningDuration,
+        targetSkills: editForm.targetSkills,
+        skillsToImprove: editForm.skillsToImprove,
+      }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      setUserInfo({ ...editForm });
+      handleCancel(section);
+      alert("✅ 資料已成功更新！");
+    } else {
+      alert(`❌ 更新失敗：${data.message}`);
+    }
+  } catch (error) {
+    alert("無法連線到伺服器！");
+  }
+};
+
+// 🚀 更新使用者個人資料 (POST)
+app.post("/api/profile/update", async (req, res) => {
+  const {
+    account,
+    chineseName,
+    englishName,
+    department,
+    phone,
+    email,
+    nationality,
+    gender,
+    // tutor 專用
+    levelListening,
+    levelSpeaking,
+    levelReading,
+    levelWriting,
+    teachingNotes,
+    availableTimes,
+    // tutee 專用
+    overallLevel,
+    learningDuration,
+    targetSkills,
+    skillsToImprove,
+  } = req.body;
+
+  try {
+    const userRes = await pool.query(
+      "SELECT id, role FROM users WHERE account = $1",
+      [account],
+    );
+    if (userRes.rows.length === 0)
+      return res.status(404).json({ success: false, message: "找不到使用者" });
+
+    const { id: userId, role } = userRes.rows[0];
+
+    // 更新 users 基本資料
+    await pool.query(
+      `UPDATE users SET chinese_name=$1, english_name=$2, email=$3 WHERE id=$4`,
+      [chineseName, englishName, email, userId],
+    );
+
+    if (role === "tutor") {
+      await pool.query(
+        `UPDATE tutor_profiles SET
+          department=$1, phone=$2, nationality=$3, gender=$4,
+          level_listening=$5, level_speaking=$6, level_reading=$7, level_writing=$8,
+          teaching_notes=$9, available_times=$10
+         WHERE user_id=$11`,
+        [
+          department,
+          phone,
+          nationality,
+          gender,
+          levelListening,
+          levelSpeaking,
+          levelReading,
+          levelWriting,
+          teachingNotes,
+          JSON.stringify(availableTimes),
+          userId,
+        ],
+      );
+    } else if (role === "tutee") {
+      await pool.query(
+        `UPDATE tutee_profiles SET
+          department=$1, phone=$2, nationality=$3, gender=$4,
+          overall_level=$5, learning_duration=$6,
+          level_listening=$7, level_speaking=$8, level_reading=$9, level_writing=$10,
+          target_skills=$11, skills_to_improve=$12,
+          available_times=$13
+         WHERE user_id=$14`,
+        [
+          department,
+          phone,
+          nationality,
+          gender,
+          overallLevel,
+          learningDuration,
+          levelListening,
+          levelSpeaking,
+          levelReading,
+          levelWriting,
+          JSON.stringify(targetSkills),
+          skillsToImprove,
+          JSON.stringify(availableTimes),
+          userId,
+        ],
+      );
+    }
+
+    res.json({ success: true, message: "✅ 資料已更新！" });
+  } catch (error) {
+    console.error("更新個人資料失敗:", error);
+    res.status(500).json({ success: false, message: "伺服器發生錯誤" });
+  }
+});
+
+// 🚀 發送私訊 (POST)
+app.post("/api/messages/send", async (req, res) => {
+  const { senderAccount, receiverId, content } = req.body;
+  if (!content?.trim())
+    return res.status(400).json({ success: false, message: "訊息不能為空" });
+  try {
+    const senderRes = await pool.query(
+      "SELECT id FROM users WHERE account = $1",
+      [senderAccount],
+    );
+    const senderId = senderRes.rows[0].id;
+    await pool.query(
+      "INSERT INTO messages (sender_id, receiver_id, content) VALUES ($1, $2, $3)",
+      [senderId, receiverId, content],
+    );
+    res.json({ success: true, message: "訊息已送出" });
+  } catch (error) {
+    console.error("發送私訊失敗:", error);
+    res.status(500).json({ success: false });
+  }
+});
+
+// 🚀 取得兩人之間的對話紀錄 (GET)
+app.get("/api/messages/:userAId/:userBId", async (req, res) => {
+  const { userAId, userBId } = req.params;
+  try {
+    const result = await pool.query(
+      `SELECT m.id, m.content, m.is_read, m.created_at,
+              m.sender_id, u.chinese_name, u.english_name
+       FROM messages m
+       JOIN users u ON m.sender_id = u.id
+       WHERE (m.sender_id = $1 AND m.receiver_id = $2)
+          OR (m.sender_id = $2 AND m.receiver_id = $1)
+       ORDER BY m.created_at ASC`,
+      [userAId, userBId],
+    );
+    // 標記對方發給我的訊息為已讀
+    await pool.query(
+      `UPDATE messages SET is_read = TRUE
+       WHERE sender_id = $1 AND receiver_id = $2 AND is_read = FALSE`,
+      [userBId, userAId],
+    );
+    res.json({ success: true, data: result.rows });
+  } catch (error) {
+    console.error("取得對話失敗:", error);
+    res.status(500).json({ success: false });
+  }
+});
+
+// 🚀 取得未讀訊息數 (GET)
+app.get("/api/messages/unread/:userId", async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT COUNT(*) FROM messages WHERE receiver_id = $1 AND is_read = FALSE",
+      [req.params.userId],
+    );
+    res.json({ success: true, count: parseInt(result.rows[0].count) });
+  } catch (error) {
+    res.status(500).json({ success: false, count: 0 });
   }
 });

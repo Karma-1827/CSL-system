@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   Home,
   UserCheck,
@@ -7,17 +7,12 @@ import {
   MessageSquare,
   ChevronDown,
   User,
-  Globe,
   LogOut,
-  FileEdit,
   FileCheck,
   CheckCircle,
   Clock,
   AlertCircle,
-  ChevronRight,
   Award,
-  ListTodo,
-  HelpCircle,
   Search,
   Filter,
   Send,
@@ -27,6 +22,7 @@ import {
   Edit,
   CheckSquare,
   Flag,
+  ChevronRight,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import logoImg from "./assets/csl-Logo.png";
@@ -39,13 +35,152 @@ const SKILL_MAP = {
   writing: "寫作",
 };
 
+// ─── 聊天視窗元件 ───────────────────────────────────────────
+function ChatWindow({ myUserId, myAccount, partner, onClose, wsRef, onRead }) {
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState("");
+  const bottomRef = useRef(null);
+
+  useEffect(() => {
+    if (!myUserId || !partner?.user_id) return;
+    fetch(`http://localhost:3001/api/messages/${myUserId}/${partner.user_id}`)
+      .then((r) => r.json())
+      .then((res) => {
+        if (res.success) setMessages(res.data);
+      });
+    onRead && onRead();
+  }, [myUserId, partner?.user_id]);
+
+  useEffect(() => {
+    if (!wsRef?.current) return;
+    const handleMsg = (event) => {
+      const msg = JSON.parse(event.data);
+      if (msg.type === "message") {
+        setMessages((prev) => [...prev, msg]);
+        onRead && onRead();
+      }
+    };
+    wsRef.current.addEventListener("message", handleMsg);
+    return () => wsRef.current?.removeEventListener("message", handleMsg);
+  }, [wsRef]);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  const handleSend = async () => {
+    if (!input.trim()) return;
+    const content = input.trim();
+    setInput("");
+    if (wsRef?.current?.readyState === 1) {
+      wsRef.current.send(
+        JSON.stringify({
+          type: "message",
+          senderId: myUserId,
+          receiverId: partner.user_id,
+          content,
+        }),
+      );
+    }
+    await fetch("http://localhost:3001/api/messages/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        senderAccount: myAccount,
+        receiverId: partner.user_id,
+        content,
+      }),
+    });
+    setMessages((prev) => [
+      ...prev,
+      {
+        sender_id: myUserId,
+        content,
+        created_at: new Date().toISOString(),
+      },
+    ]);
+  };
+
+  const partnerName = partner?.chinese_name || partner?.english_name || "對方";
+  const partnerInitial = (partner?.english_name || partner?.chinese_name || "?")
+    .charAt(0)
+    .toUpperCase();
+
+  return (
+    <div
+      className="fixed bottom-0 right-6 z-[200] w-72 bg-white rounded-t-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden"
+      style={{ height: "420px" }}
+    >
+      <div
+        className="bg-slate-700 px-4 py-3 flex justify-between items-center cursor-pointer select-none"
+        onClick={onClose}
+      >
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 bg-green-400 text-white rounded-full flex items-center justify-center font-bold text-sm flex-shrink-0">
+            {partnerInitial}
+          </div>
+          <div>
+            <p className="text-white font-bold text-sm leading-tight">
+              {partnerName}
+            </p>
+            <p className="text-green-300 text-[10px] font-medium">已配對</p>
+          </div>
+        </div>
+        <X size={16} className="text-slate-300 hover:text-white" />
+      </div>
+      <div className="flex-grow overflow-y-auto p-3 flex flex-col gap-2 bg-slate-50">
+        {messages.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-full text-slate-400 text-sm gap-2">
+            <MessageSquare size={32} className="text-slate-200" />
+            還沒有訊息，開始聊天吧！
+          </div>
+        ) : (
+          messages.map((msg, idx) => {
+            const isMine = String(msg.sender_id) === String(myUserId);
+            return (
+              <div
+                key={msg.id || idx}
+                className={`flex ${isMine ? "justify-end" : "justify-start"}`}
+              >
+                <div
+                  className={`max-w-[75%] px-3 py-2 rounded-2xl text-sm leading-relaxed shadow-sm ${isMine ? "bg-primary text-white rounded-br-none" : "bg-white text-slate-700 border border-slate-200 rounded-bl-none"}`}
+                >
+                  {msg.content}
+                </div>
+              </div>
+            );
+          })
+        )}
+        <div ref={bottomRef} />
+      </div>
+      <div className="p-2.5 border-t border-slate-100 flex gap-2 bg-white">
+        <input
+          type="text"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && handleSend()}
+          placeholder="輸入訊息..."
+          className="flex-1 border border-slate-200 rounded-full px-3 py-1.5 text-sm outline-none focus:border-primary"
+        />
+        <button
+          onClick={handleSend}
+          className="w-8 h-8 flex items-center justify-center bg-primary text-white rounded-full hover:bg-primary-dark transition flex-shrink-0"
+        >
+          <Send size={14} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── 主元件 ────────────────────────────────────────────────
 function TutorDashboard() {
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const navigate = useNavigate();
-
   const [activeTab, setActiveTab] = useState(
     () => sessionStorage.getItem("tutorActiveTab") || "home",
   );
+
   const [userInfo, setUserInfo] = useState({
     account: "",
     chineseName: "",
@@ -56,11 +191,10 @@ function TutorDashboard() {
     id: null,
     matched_tutee_id: null,
   });
-
   const [tuteesList, setTuteesList] = useState([]);
   const [matchedTutee, setMatchedTutee] = useState(null);
 
-  // ── 篩選條件 state ──────────────────────────────────────
+  // 篩選
   const [filterOpen, setFilterOpen] = useState(false);
   const [filterNationality, setFilterNationality] = useState("All");
   const [filterGender, setFilterGender] = useState("All");
@@ -68,7 +202,6 @@ function TutorDashboard() {
   const [filterSkills, setFilterSkills] = useState([]);
   const [filterDays, setFilterDays] = useState([]);
   const [filterSlots, setFilterSlots] = useState([]);
-
   const FILTER_DAYS = [
     { id: "Mon", label: "一" },
     { id: "Tue", label: "二" },
@@ -82,10 +215,8 @@ function TutorDashboard() {
     "13:00-15:00",
     "15:00-17:00",
   ];
-
   const toggleArr = (arr, setArr, val) =>
     setArr(arr.includes(val) ? arr.filter((x) => x !== val) : [...arr, val]);
-
   const resetFilters = () => {
     setFilterNationality("All");
     setFilterGender("All");
@@ -94,7 +225,6 @@ function TutorDashboard() {
     setFilterDays([]);
     setFilterSlots([]);
   };
-
   const activeFilterCount = [
     filterGender !== "All",
     filterLevel !== "All",
@@ -102,7 +232,7 @@ function TutorDashboard() {
     filterDays.length > 0 || filterSlots.length > 0,
   ].filter(Boolean).length;
 
-  // 補簽到相關 state
+  // 補簽到
   const [makeupModal, setMakeupModal] = useState({
     isOpen: false,
     classId: null,
@@ -111,7 +241,7 @@ function TutorDashboard() {
   const [makeupFile, setMakeupFile] = useState(null);
   const [makeupRemaining, setMakeupRemaining] = useState(5);
 
-  // 課堂紀錄相關 state
+  // 課堂紀錄
   const [notesModal, setNotesModal] = useState({
     isOpen: false,
     classId: null,
@@ -129,6 +259,7 @@ function TutorDashboard() {
   const [existingNote, setExistingNote] = useState(null);
   const [notesRemaining, setNotesRemaining] = useState(5);
 
+  // 課程
   const [classes, setClasses] = useState([]);
   const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
   const [slots, setSlots] = useState([
@@ -136,7 +267,6 @@ function TutorDashboard() {
   ]);
   const [isRecurring, setIsRecurring] = useState(false);
   const [endDate, setEndDate] = useState("");
-
   const [editClassModal, setEditClassModal] = useState({
     isOpen: false,
     classId: null,
@@ -144,159 +274,14 @@ function TutorDashboard() {
     startTime: "",
     endTime: "",
   });
-
   const [hasSentAlert, setHasSentAlert] = useState(false);
 
-  // ── 輔導時數相關 state ──────────────────────────────
+  // 輔導時數
   const [hoursData, setHoursData] = useState([]);
   const [approvedHours, setApprovedHours] = useState(0);
   const [certStatus, setCertStatus] = useState(null);
 
-  const handleEmergencyAlert = async (cls) => {
-    if (
-      !window.confirm(
-        "確定要送出緊急通報嗎？\n助教將收到通知：您目前聯絡不到對方。",
-      )
-    )
-      return;
-
-    try {
-      const res = await fetch(
-        `http://localhost:3001/api/classes/${cls.id}/emergency`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ userId: userInfo.user_id, role: "tutor" }),
-        },
-      );
-      const data = await res.json();
-      alert(data.message);
-      if (data.success) setHasSentAlert(true);
-    } catch (err) {
-      alert("連線錯誤");
-    }
-  };
-
-  // --- fetch functions ---
-  const fetchMakeupRemaining = (userId) => {
-    fetch(`http://localhost:3001/api/makeup-remaining/${userId}`)
-      .then((res) => res.json())
-      .then((result) => {
-        if (result.success) setMakeupRemaining(result.remaining);
-      });
-  };
-
-  const fetchNotesRemaining = (userId) => {
-    fetch(`http://localhost:3001/api/notes-remaining/${userId}`)
-      .then((res) => res.json())
-      .then((result) => {
-        if (result.success) setNotesRemaining(result.remaining);
-      });
-  };
-
-  // ── 輔導時數 fetch ──────────────────────────────────
-  const fetchHours = (userId) => {
-    fetch(`http://localhost:3001/api/tutor/hours/${userId}`)
-      .then((res) => res.json())
-      .then((result) => {
-        if (result.success) {
-          setHoursData(result.data);
-          setApprovedHours(result.approvedHours || 0);
-        }
-      });
-  };
-
-  const fetchCertStatus = (userId) => {
-    fetch(`http://localhost:3001/api/tutor/certificate-status/${userId}`)
-      .then((res) => res.json())
-      .then((result) => {
-        if (result.success && result.data) setCertStatus(result.data.status);
-      });
-  };
-
-  useEffect(() => {
-    const account = localStorage.getItem("loggedInAccount");
-    if (account) {
-      fetch(`http://localhost:3001/api/profile/${account}`)
-        .then((res) => res.json())
-        .then((result) => {
-          if (result.success) {
-            setUserInfo({
-              ...result.data,
-              account,
-              matched_tutee_id: result.data.matched_tutee_id,
-            });
-            if (result.data.matched_tutee_id)
-              fetchMatchedTutee(result.data.matched_tutee_id);
-            if (result.data.user_id) {
-              fetchClasses(result.data.user_id);
-              fetchMakeupRemaining(result.data.user_id);
-              fetchNotesRemaining(result.data.user_id);
-              // ── 新增 ──
-              fetchHours(result.data.user_id);
-              fetchCertStatus(result.data.user_id);
-            }
-          }
-        });
-      fetchTutees();
-    } else {
-      navigate("/");
-    }
-  }, [navigate]);
-
-  const fetchTutees = () =>
-    fetch("http://localhost:3001/api/match/tutees")
-      .then((res) => res.json())
-      .then((result) => {
-        if (result.success) setTuteesList(result.data);
-      });
-
-  const fetchMatchedTutee = (tuteeId) =>
-    fetch(`http://localhost:3001/api/match/tutee-info/${tuteeId}`)
-      .then((res) => res.json())
-      .then((result) => {
-        if (result.success) setMatchedTutee(result.data);
-      });
-
-  const fetchClasses = (userId) =>
-    fetch(`http://localhost:3001/api/classes/${userId}`)
-      .then((res) => res.json())
-      .then((result) => {
-        if (result.success) setClasses(result.data);
-      });
-
-  useEffect(() => {
-    sessionStorage.setItem("tutorActiveTab", activeTab);
-  }, [activeTab]);
-
-  const avatarInitial = userInfo.englishName
-    ? userInfo.englishName.charAt(0).toUpperCase()
-    : "T";
-  const displayName = userInfo.chineseName
-    ? `${userInfo.chineseName} ${userInfo.englishName}`
-    : userInfo.englishName || "Tutor Name";
-
-  const handleLogout = () => {
-    localStorage.removeItem("loggedInAccount");
-    navigate("/");
-  };
-
-  const handleSendRequest = async (tuteeUserId, tuteeName) => {
-    if (!window.confirm(`確定要向 ${tuteeName} 發送輔導邀請嗎？`)) return;
-    try {
-      const res = await fetch("http://localhost:3001/api/match/request", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tutorAccount: userInfo.account, tuteeUserId }),
-      });
-      const data = await res.json();
-      alert(data.message);
-      if (data.success) fetchTutees();
-    } catch (err) {
-      alert("連線錯誤");
-    }
-  };
-
+  // 異常回報
   const [reportModal, setReportModal] = useState({
     isOpen: false,
     classId: null,
@@ -311,11 +296,289 @@ function TutorDashboard() {
     file: null,
   });
 
+  // ── 私訊 / WebSocket ──
+  const [chatOpen, setChatOpen] = useState(false);
+  const [unreadMsg, setUnreadMsg] = useState(0);
+  const wsRef = useRef(null);
+
+  // ─── fetch helpers ───
+  const fetchMakeupRemaining = (userId) =>
+    fetch(`http://localhost:3001/api/makeup-remaining/${userId}`)
+      .then((r) => r.json())
+      .then((res) => {
+        if (res.success) setMakeupRemaining(res.remaining);
+      });
+
+  const fetchNotesRemaining = (userId) =>
+    fetch(`http://localhost:3001/api/notes-remaining/${userId}`)
+      .then((r) => r.json())
+      .then((res) => {
+        if (res.success) setNotesRemaining(res.remaining);
+      });
+
+  const fetchHours = (userId) =>
+    fetch(`http://localhost:3001/api/tutor/hours/${userId}`)
+      .then((r) => r.json())
+      .then((res) => {
+        if (res.success) {
+          setHoursData(res.data);
+          setApprovedHours(res.approvedHours || 0);
+        }
+      });
+
+  const fetchCertStatus = (userId) =>
+    fetch(`http://localhost:3001/api/tutor/certificate-status/${userId}`)
+      .then((r) => r.json())
+      .then((res) => {
+        if (res.success && res.data) setCertStatus(res.data.status);
+      });
+
+  const fetchUnreadMsg = (userId) =>
+    fetch(`http://localhost:3001/api/messages/unread/${userId}`)
+      .then((r) => r.json())
+      .then((res) => {
+        if (res.success) setUnreadMsg(res.count);
+      });
+
+  const fetchTutees = () =>
+    fetch("http://localhost:3001/api/match/tutees")
+      .then((r) => r.json())
+      .then((res) => {
+        if (res.success) setTuteesList(res.data);
+      });
+
+  const fetchMatchedTutee = (tuteeId) =>
+    fetch(`http://localhost:3001/api/match/tutee-info/${tuteeId}`)
+      .then((r) => r.json())
+      .then((res) => {
+        if (res.success) setMatchedTutee(res.data);
+      });
+
+  const fetchClasses = (userId) =>
+    fetch(`http://localhost:3001/api/classes/${userId}`)
+      .then((r) => r.json())
+      .then((res) => {
+        if (res.success) setClasses(res.data);
+      });
+
+  // ─── 初始化 ───
+  useEffect(() => {
+    const account = localStorage.getItem("loggedInAccount");
+    if (account) {
+      fetch(`http://localhost:3001/api/profile/${account}`)
+        .then((r) => r.json())
+        .then((result) => {
+          if (result.success) {
+            setUserInfo({
+              ...result.data,
+              account,
+              matched_tutee_id: result.data.matched_tutee_id,
+            });
+            if (result.data.matched_tutee_id)
+              fetchMatchedTutee(result.data.matched_tutee_id);
+            if (result.data.user_id) {
+              fetchClasses(result.data.user_id);
+              fetchMakeupRemaining(result.data.user_id);
+              fetchNotesRemaining(result.data.user_id);
+              fetchHours(result.data.user_id);
+              fetchCertStatus(result.data.user_id);
+              fetchUnreadMsg(result.data.user_id);
+
+              // WebSocket
+              const ws = new WebSocket("ws://localhost:3001");
+              wsRef.current = ws;
+              ws.onopen = () =>
+                ws.send(
+                  JSON.stringify({
+                    type: "register",
+                    userId: result.data.user_id,
+                  }),
+                );
+              ws.onmessage = () => fetchUnreadMsg(result.data.user_id);
+            }
+          }
+        });
+      fetchTutees();
+    } else {
+      navigate("/");
+    }
+    return () => wsRef.current?.close();
+  }, [navigate]);
+
+  useEffect(() => {
+    sessionStorage.setItem("tutorActiveTab", activeTab);
+  }, [activeTab]);
+
+  const avatarInitial = userInfo.englishName
+    ? userInfo.englishName.charAt(0).toUpperCase()
+    : "T";
+  const displayName = userInfo.chineseName
+    ? `${userInfo.chineseName} ${userInfo.englishName}`
+    : userInfo.englishName || "Tutor Name";
+  const handleLogout = () => {
+    localStorage.removeItem("loggedInAccount");
+    navigate("/");
+  };
+
+  // ─── 緊急通報 ───
+  const handleEmergencyAlert = async (cls) => {
+    if (
+      !window.confirm(
+        "確定要送出緊急通報嗎？\n助教將收到通知：您目前聯絡不到對方。",
+      )
+    )
+      return;
+    try {
+      const res = await fetch(
+        `http://localhost:3001/api/classes/${cls.id}/emergency`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId: userInfo.user_id, role: "tutor" }),
+        },
+      );
+      const data = await res.json();
+      alert(data.message);
+      if (data.success) setHasSentAlert(true);
+    } catch {
+      alert("連線錯誤");
+    }
+  };
+
+  // ─── 配對邀請 ───
+  const handleSendRequest = async (tuteeUserId, tuteeName) => {
+    if (!window.confirm(`確定要向 ${tuteeName} 發送輔導邀請嗎？`)) return;
+    try {
+      const res = await fetch("http://localhost:3001/api/match/request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tutorAccount: userInfo.account, tuteeUserId }),
+      });
+      const data = await res.json();
+      alert(data.message);
+      if (data.success) fetchTutees();
+    } catch {
+      alert("連線錯誤");
+    }
+  };
+
+  // ─── 課程操作 ───
+  const handleCheckin = async (classId) => {
+    try {
+      const res = await fetch(
+        `http://localhost:3001/api/classes/${classId}/checkin`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ role: "tutor" }),
+        },
+      );
+      const data = await res.json();
+      alert(data.message);
+      if (data.success) fetchClasses(userInfo.user_id);
+    } catch {
+      alert("連線錯誤");
+    }
+  };
+
+  const handleMakeupCheckin = async (e) => {
+    e.preventDefault();
+    if (!makeupReason.trim()) return alert("請填寫說明原因");
+    const formData = new FormData();
+    formData.append("userId", userInfo.user_id);
+    formData.append("role", "tutor");
+    formData.append("reason", makeupReason);
+    if (makeupFile) formData.append("attachment", makeupFile);
+    try {
+      const res = await fetch(
+        `http://localhost:3001/api/classes/${makeupModal.classId}/makeup-checkin`,
+        { method: "POST", body: formData },
+      );
+      const data = await res.json();
+      alert(data.message);
+      if (data.success) {
+        setMakeupModal({ isOpen: false, classId: null });
+        setMakeupReason("");
+        setMakeupFile(null);
+        fetchMakeupRemaining(userInfo.user_id);
+      }
+    } catch {
+      alert("連線錯誤");
+    }
+  };
+
+  const handleOpenNotesModal = async (cls) => {
+    const dateStr = cls.class_date.split("T")[0];
+    const deadline = new Date(`${dateStr}T23:59:59`);
+    const isDeadlinePassed = new Date() > deadline;
+    setNotesModal({
+      isOpen: true,
+      classId: cls.id,
+      classDate: dateStr,
+      startTime: cls.start_time.substring(0, 5),
+      endTime: cls.end_time.substring(0, 5),
+      isDeadlinePassed,
+    });
+    try {
+      const res = await fetch(
+        `http://localhost:3001/api/classes/${cls.id}/notes/${userInfo.user_id}`,
+      );
+      const data = await res.json();
+      if (data.success && data.data) {
+        setExistingNote(data.data);
+        setNotesForm({
+          location: data.data.location || "",
+          content: data.data.content || "",
+          remarks: data.data.remarks || "",
+          file: null,
+        });
+      } else {
+        setExistingNote(null);
+        setNotesForm({ location: "", content: "", remarks: "", file: null });
+      }
+    } catch {
+      setExistingNote(null);
+    }
+  };
+
+  const handleNotesSubmit = async (e) => {
+    e.preventDefault();
+    if (!notesForm.content.trim()) return alert("請填寫上課內容！");
+    const formData = new FormData();
+    formData.append("userId", userInfo.user_id);
+    formData.append("role", "tutor");
+    formData.append("location", notesForm.location);
+    formData.append("content", notesForm.content);
+    formData.append("remarks", notesForm.remarks);
+    if (notesForm.file) formData.append("attachment", notesForm.file);
+    const apiUrl = notesModal.isDeadlinePassed
+      ? `http://localhost:3001/api/classes/${notesModal.classId}/makeup-notes`
+      : `http://localhost:3001/api/classes/${notesModal.classId}/notes`;
+    try {
+      const res = await fetch(apiUrl, { method: "POST", body: formData });
+      const data = await res.json();
+      alert(data.message);
+      if (data.success) {
+        setNotesModal({
+          isOpen: false,
+          classId: null,
+          classDate: "",
+          startTime: "",
+          endTime: "",
+          isDeadlinePassed: false,
+        });
+        if (notesModal.isDeadlinePassed) fetchNotesRemaining(userInfo.user_id);
+        fetchClasses(userInfo.user_id);
+      }
+    } catch {
+      alert("連線錯誤");
+    }
+  };
+
   const handleReportSubmit = async (e) => {
     e.preventDefault();
     if (!reportForm.reportType) return alert("請選擇回報類型！");
     if (!reportForm.content.trim()) return alert("請填寫回報內容！");
-
     const formData = new FormData();
     formData.append("userId", userInfo.user_id);
     formData.append("role", "tutor");
@@ -323,7 +586,6 @@ function TutorDashboard() {
     formData.append("location", reportForm.location);
     formData.append("content", reportForm.content);
     if (reportForm.file) formData.append("attachment", reportForm.file);
-
     try {
       const res = await fetch(
         `http://localhost:3001/api/classes/${reportModal.classId}/report`,
@@ -346,50 +608,48 @@ function TutorDashboard() {
           file: null,
         });
       }
-    } catch (err) {
+    } catch {
       alert("連線錯誤");
     }
   };
 
   const handleAddSlot = () =>
     setSlots([...slots, { date: "", startTime: "14:00", endTime: "15:00" }]);
-  const handleRemoveSlot = (index) =>
-    setSlots(slots.filter((_, i) => i !== index));
-  const handleSlotChange = (index, field, value) => {
-    const newSlots = [...slots];
-    newSlots[index][field] = value;
-    setSlots(newSlots);
+  const handleRemoveSlot = (i) => setSlots(slots.filter((_, idx) => idx !== i));
+  const handleSlotChange = (i, field, value) => {
+    const s = [...slots];
+    s[i][field] = value;
+    setSlots(s);
   };
 
   const getWeekdayString = (dateString) => {
     if (!dateString) return "";
     const [y, m, d] = dateString.split("-");
-    const weekdays = ["日", "一", "二", "三", "四", "五", "六"];
-    return weekdays[new Date(y, m - 1, d).getDay()];
+    return ["日", "一", "二", "三", "四", "五", "六"][
+      new Date(y, m - 1, d).getDay()
+    ];
   };
 
   const handleScheduleSubmit = async (e) => {
     e.preventDefault();
-    for (const slot of slots)
-      if (!slot.date || !slot.startTime || !slot.endTime)
+    for (const s of slots)
+      if (!s.date || !s.startTime || !s.endTime)
         return alert("請填寫所有時段的日期與時間！");
     if (isRecurring && !endDate) return alert("請選擇重複結束的日期！");
-
     let totalHours = 0;
-    slots.forEach((slot) => {
-      const start = new Date(`1970-01-01T${slot.startTime}`);
-      const end = new Date(`1970-01-01T${slot.endTime}`);
-      const diff = (end - start) / (1000 * 60 * 60);
+    slots.forEach((s) => {
+      const diff =
+        (new Date(`1970-01-01T${s.endTime}`) -
+          new Date(`1970-01-01T${s.startTime}`)) /
+        3600000;
       if (diff > 0) totalHours += diff;
     });
-
     if (totalHours > 2)
       return alert(
         `⚠️ 每週輔導時間不可超過 2 小時！\n(您目前安排了 ${totalHours} 小時)`,
       );
     if (totalHours <= 0)
       return alert("時間設定有誤，結束時間必須晚於開始時間！");
-
     try {
       const res = await fetch("http://localhost:3001/api/classes/schedule", {
         method: "POST",
@@ -411,7 +671,7 @@ function TutorDashboard() {
         setEndDate("");
         fetchClasses(userInfo.user_id);
       }
-    } catch (error) {
+    } catch {
       alert("連線錯誤");
     }
   };
@@ -443,375 +703,249 @@ function TutorDashboard() {
         });
         fetchClasses(userInfo.user_id);
       }
-    } catch (error) {
+    } catch {
       alert("連線錯誤");
     }
   };
 
-  const handleCheckin = async (classId) => {
+  const handleApplyCert = async () => {
+    if (!window.confirm("確認申請實習時數證明？申請後請等待管理員審核。"))
+      return;
     try {
       const res = await fetch(
-        `http://localhost:3001/api/classes/${classId}/checkin`,
+        "http://localhost:3001/api/tutor/apply-certificate",
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ role: "tutor" }),
+          body: JSON.stringify({ userId: userInfo.user_id }),
         },
       );
       const data = await res.json();
       alert(data.message);
-      if (data.success) fetchClasses(userInfo.user_id);
-    } catch (err) {
+      if (data.success) fetchCertStatus(userInfo.user_id);
+    } catch {
       alert("連線錯誤");
     }
   };
 
-  const handleMakeupCheckin = async (e) => {
-    e.preventDefault();
-    if (!makeupReason.trim()) return alert("請填寫說明原因");
-    const formData = new FormData();
-    formData.append("userId", userInfo.user_id);
-    formData.append("role", "tutor");
-    formData.append("reason", makeupReason);
-    if (makeupFile) formData.append("attachment", makeupFile);
-    try {
-      const res = await fetch(
-        `http://localhost:3001/api/classes/${makeupModal.classId}/makeup-checkin`,
-        { method: "POST", body: formData },
-      );
-      const data = await res.json();
-      alert(data.message);
-      if (data.success) {
-        setMakeupModal({ isOpen: false, classId: null });
-        setMakeupReason("");
-        setMakeupFile(null);
-        fetchMakeupRemaining(userInfo.user_id);
-      }
-    } catch (err) {
-      alert("連線錯誤");
-    }
-  };
-
-  const handleOpenNotesModal = async (cls) => {
+  // ═══════════════════════════════════════════════════════
+  // 渲染：課程卡片
+  // ═══════════════════════════════════════════════════════
+  const renderClassCard = (cls, type = "normal") => {
     const dateStr = cls.class_date.split("T")[0];
     const [year, month, day] = dateStr.split("-").map(Number);
     const displayDate = new Date(year, month - 1, day);
-    const deadline = new Date(`${dateStr}T23:59:59`);
-    const isDeadlinePassed = new Date() > deadline;
-
-    setNotesModal({
-      isOpen: true,
-      classId: cls.id,
-      classDate: dateStr,
-      startTime: cls.start_time.substring(0, 5),
-      endTime: cls.end_time.substring(0, 5),
-      isDeadlinePassed,
-    });
-
-    try {
-      const res = await fetch(
-        `http://localhost:3001/api/classes/${cls.id}/notes/${userInfo.user_id}`,
-      );
-      const data = await res.json();
-      if (data.success && data.data) {
-        setExistingNote(data.data);
-        setNotesForm({
-          location: data.data.location || "",
-          content: data.data.content || "",
-          remarks: data.data.remarks || "",
-          file: null,
-        });
-      } else {
-        setExistingNote(null);
-        setNotesForm({ location: "", content: "", remarks: "", file: null });
-      }
-    } catch (err) {
-      setExistingNote(null);
-    }
-  };
-
-  const handleNotesSubmit = async (e) => {
-    e.preventDefault();
-    if (!notesForm.content.trim()) return alert("請填寫上課內容！");
-
-    const formData = new FormData();
-    formData.append("userId", userInfo.user_id);
-    formData.append("role", "tutor");
-    formData.append("location", notesForm.location);
-    formData.append("content", notesForm.content);
-    formData.append("remarks", notesForm.remarks);
-    if (notesForm.file) formData.append("attachment", notesForm.file);
-
-    const apiUrl = notesModal.isDeadlinePassed
-      ? `http://localhost:3001/api/classes/${notesModal.classId}/makeup-notes`
-      : `http://localhost:3001/api/classes/${notesModal.classId}/notes`;
-
-    try {
-      const res = await fetch(apiUrl, { method: "POST", body: formData });
-      const data = await res.json();
-      alert(data.message);
-      if (data.success) {
-        setNotesModal({
-          isOpen: false,
-          classId: null,
-          classDate: "",
-          startTime: "",
-          endTime: "",
-          isDeadlinePassed: false,
-        });
-        if (notesModal.isDeadlinePassed) fetchNotesRemaining(userInfo.user_id);
-        fetchClasses(userInfo.user_id);
-      }
-    } catch (err) {
-      alert("連線錯誤");
-    }
-  };
-
-  // --- 介面 1：首頁 ---
-  const renderHome = () => {
+    const isPast = type === "past";
+    const isUpcoming = type === "upcoming";
     const now = new Date();
-    const pastClasses = [];
-    const upcomingAndFuture = [];
+    const deadline = new Date(`${dateStr}T23:59:59`);
+    const isSigned = !!cls.tutor_signed_at;
+    const isDeadlinePassed = now > deadline;
+    const classStart = new Date(`${dateStr}T${cls.start_time}`);
+    const windowStart = new Date(classStart.getTime() - 30 * 60 * 1000);
+    const canCheckin = now >= windowStart && !isDeadlinePassed;
 
-    classes.forEach((cls) => {
-      const dateStr = cls.class_date.split("T")[0];
-      const classEndTime = new Date(`${dateStr}T${cls.end_time}`);
-      if (classEndTime < now) {
-        pastClasses.push(cls);
-      } else {
-        upcomingAndFuture.push(cls);
-      }
-    });
-
-    pastClasses.sort((a, b) => new Date(b.class_date) - new Date(a.class_date));
-    upcomingAndFuture.sort(
-      (a, b) => new Date(a.class_date) - new Date(b.class_date),
-    );
-
-    const upcomingClass =
-      upcomingAndFuture.length > 0 ? upcomingAndFuture[0] : null;
-    const futureClasses =
-      upcomingAndFuture.length > 1 ? upcomingAndFuture.slice(1) : [];
-
-    const renderClassCard = (cls, type = "normal") => {
-      const dateStr = cls.class_date.split("T")[0];
-      const [year, month, day] = dateStr.split("-").map(Number);
-      const displayDate = new Date(year, month - 1, day);
-      const isPast = type === "past";
-      const isUpcoming = type === "upcoming";
-
-      return (
-        <div
-          key={cls.id}
-          className={`p-5 rounded-xl border flex flex-col gap-4 transition group ${isPast ? "bg-slate-50 border-slate-200 opacity-80" : "bg-white border-slate-100 shadow-sm hover:border-primary/30 hover:shadow-md"}`}
-        >
-          <div className="flex justify-between items-center">
-            <div className="flex items-center">
-              <div
-                className={`w-12 h-12 rounded-xl flex flex-col items-center justify-center mr-4 flex-shrink-0 ${isPast ? "bg-slate-200 text-slate-500" : "bg-blue-50 border border-blue-100 text-blue-600"}`}
-              >
-                <span className="text-[10px] font-bold uppercase">
-                  {displayDate.toLocaleDateString("en-US", { month: "short" })}
-                </span>
-                <span className="text-lg font-black leading-none">
-                  {displayDate.getDate()}
-                </span>
-              </div>
-              <div>
-                <p
-                  className={`font-bold ${isPast ? "text-slate-600" : "text-slate-800"} text-lg`}
-                >
-                  {matchedTutee
-                    ? matchedTutee.chinese_name || matchedTutee.english_name
-                    : "學生未載入"}
-                </p>
-                <p className="text-sm font-medium text-slate-500 flex items-center mt-1">
-                  <Clock size={14} className="mr-1.5" />{" "}
-                  {cls.start_time.substring(0, 5)} ~{" "}
-                  {cls.end_time.substring(0, 5)}
-                </p>
-              </div>
+    return (
+      <div
+        key={cls.id}
+        className={`p-5 rounded-xl border flex flex-col gap-4 transition ${isPast ? "bg-slate-50 border-slate-200 opacity-80" : "bg-white border-slate-100 shadow-sm hover:border-primary/30 hover:shadow-md"}`}
+      >
+        <div className="flex justify-between items-center">
+          <div className="flex items-center">
+            <div
+              className={`w-12 h-12 rounded-xl flex flex-col items-center justify-center mr-4 flex-shrink-0 ${isPast ? "bg-slate-200 text-slate-500" : "bg-blue-50 border border-blue-100 text-blue-600"}`}
+            >
+              <span className="text-[10px] font-bold uppercase">
+                {displayDate.toLocaleDateString("en-US", { month: "short" })}
+              </span>
+              <span className="text-lg font-black leading-none">
+                {displayDate.getDate()}
+              </span>
             </div>
-            <div className="flex flex-col items-end gap-2 flex-shrink-0 ml-2">
-              {isUpcoming && (
-                <span className="px-3 py-1 bg-amber-100 text-amber-700 font-bold text-xs rounded-full shadow-sm animate-pulse">
-                  即將上課
-                </span>
-              )}
-              {isUpcoming &&
-                (() => {
-                  const now = new Date();
-                  const classStart = new Date(`${dateStr}T${cls.start_time}`);
-                  const classEnd = new Date(`${dateStr}T${cls.end_time}`);
-                  const isInClass = now >= classStart && now <= classEnd;
-
-                  if (!isInClass) return null;
-
-                  return hasSentAlert ? (
-                    <span className="px-3 py-1 bg-red-100 text-red-500 font-bold text-xs rounded-full">
-                      🚨 已通報
-                    </span>
-                  ) : (
-                    <button
-                      onClick={() => handleEmergencyAlert(cls)}
-                      className="px-3 py-1 bg-red-500 text-white font-bold text-xs rounded-full hover:bg-red-600 transition shadow-sm animate-pulse"
-                    >
-                      🚨 緊急通報 SOS
-                    </button>
-                  );
-                })()}
+            <div>
+              <p
+                className={`font-bold ${isPast ? "text-slate-600" : "text-slate-800"} text-lg`}
+              >
+                {matchedTutee
+                  ? matchedTutee.chinese_name || matchedTutee.english_name
+                  : "學生未載入"}
+              </p>
+              <p className="text-sm font-medium text-slate-500 flex items-center mt-1">
+                <Clock size={14} className="mr-1.5" />{" "}
+                {cls.start_time.substring(0, 5)} ~{" "}
+                {cls.end_time.substring(0, 5)}
+              </p>
             </div>
           </div>
-
-          <div className="grid grid-cols-4 gap-2 pt-3 border-t border-slate-100">
-            {!isPast ? (
-              <button
-                onClick={() =>
-                  setEditClassModal({
-                    isOpen: true,
-                    classId: cls.id,
-                    date: dateStr,
-                    startTime: cls.start_time.substring(0, 5),
-                    endTime: cls.end_time.substring(0, 5),
-                  })
-                }
-                className="flex flex-col items-center justify-center py-2 rounded-lg text-slate-500 hover:bg-blue-50 hover:text-blue-600 transition"
-              >
-                <Edit size={16} className="mb-1" />
-                <span className="text-xs font-bold">編輯時間</span>
-              </button>
-            ) : (
-              <button
-                disabled
-                className="flex flex-col items-center justify-center py-2 rounded-lg text-slate-300 cursor-not-allowed"
-              >
-                <Edit size={16} className="mb-1" />
-                <span className="text-xs font-bold">不可編輯</span>
-              </button>
+          <div className="flex flex-col items-end gap-2 flex-shrink-0 ml-2">
+            {isUpcoming && (
+              <span className="px-3 py-1 bg-amber-100 text-amber-700 font-bold text-xs rounded-full shadow-sm animate-pulse">
+                即將上課
+              </span>
             )}
+            {isUpcoming &&
+              (() => {
+                const classEnd = new Date(`${dateStr}T${cls.end_time}`);
+                const isInClass = now >= classStart && now <= classEnd;
+                if (!isInClass) return null;
+                return hasSentAlert ? (
+                  <span className="px-3 py-1 bg-red-100 text-red-500 font-bold text-xs rounded-full">
+                    🚨 已通報
+                  </span>
+                ) : (
+                  <button
+                    onClick={() => handleEmergencyAlert(cls)}
+                    className="px-3 py-1 bg-red-500 text-white font-bold text-xs rounded-full hover:bg-red-600 transition shadow-sm animate-pulse"
+                  >
+                    🚨 緊急通報 SOS
+                  </button>
+                );
+              })()}
+          </div>
+        </div>
 
-            {(() => {
-              const deadline = new Date(`${dateStr}T23:59:59`);
-              const nowTime = new Date();
-              const isSigned = !!cls.tutor_signed_at;
-              const isDeadlinePassed = nowTime > deadline;
-              const classStart = new Date(`${dateStr}T${cls.start_time}`);
-              const windowStart = new Date(
-                classStart.getTime() - 30 * 60 * 1000,
-              );
-              const canCheckin = nowTime >= windowStart && !isDeadlinePassed;
-
-              if (isSigned) {
-                return (
-                  <button
-                    disabled
-                    className="flex flex-col items-center justify-center py-2 rounded-lg text-green-600 bg-green-50 cursor-default"
-                  >
-                    <CheckSquare size={16} className="mb-1" />
-                    <span className="text-xs font-bold">已簽到 ✓</span>
-                  </button>
-                );
-              } else if (isDeadlinePassed) {
-                return (
-                  <button
-                    onClick={() =>
-                      setMakeupModal({ isOpen: true, classId: cls.id })
-                    }
-                    className="flex flex-col items-center justify-center py-2 rounded-lg text-red-500 hover:bg-red-50 transition"
-                  >
-                    <CheckSquare size={16} className="mb-1" />
-                    <span className="text-xs font-bold">補簽到</span>
-                  </button>
-                );
-              } else {
-                return (
-                  <button
-                    onClick={() => handleCheckin(cls.id)}
-                    disabled={!canCheckin}
-                    className={`flex flex-col items-center justify-center py-2 rounded-lg transition ${canCheckin ? "text-slate-500 hover:bg-orange-50 hover:text-orange-600" : "text-slate-300 cursor-not-allowed"}`}
-                  >
-                    <CheckSquare size={16} className="mb-1" />
-                    <span className="text-xs font-bold">老師簽到</span>
-                  </button>
-                );
-              }
-            })()}
-
-            {(() => {
-              const dateStr = cls.class_date.split("T")[0];
-              const nowTime = new Date();
-              const classStart = new Date(`${dateStr}T${cls.start_time}`);
-              const deadline = new Date(`${dateStr}T23:59:59`);
-              const canFillNote = nowTime >= classStart; // 上課開始後才能填
-              const isNoteDeadlinePassed = nowTime > deadline; // 超過截止→補填
-
-              if (cls.has_note) {
-                // 已填寫：永遠可以查看
-                return (
-                  <button
-                    onClick={() => handleOpenNotesModal(cls)}
-                    className="flex flex-col items-center justify-center py-2 rounded-lg text-green-600 bg-green-50 transition"
-                  >
-                    <FileText size={16} className="mb-1" />
-                    <span className="text-xs font-bold">已填寫 ✓</span>
-                  </button>
-                );
-              } else if (isNoteDeadlinePassed) {
-                // 超過截止且未填 → 補填
-                return (
-                  <button
-                    onClick={() => handleOpenNotesModal(cls)}
-                    className="flex flex-col items-center justify-center py-2 rounded-lg text-red-500 hover:bg-red-50 transition"
-                  >
-                    <FileText size={16} className="mb-1" />
-                    <span className="text-xs font-bold">補填紀錄</span>
-                  </button>
-                );
-              } else if (canFillNote) {
-                // 上課已開始、截止前 → 可填寫
-                return (
-                  <button
-                    onClick={() => handleOpenNotesModal(cls)}
-                    className="flex flex-col items-center justify-center py-2 rounded-lg text-slate-500 hover:bg-green-50 hover:text-green-600 transition"
-                  >
-                    <FileText size={16} className="mb-1" />
-                    <span className="text-xs font-bold">課堂紀錄</span>
-                  </button>
-                );
-              } else {
-                // 還沒上課 → 灰色 disabled
-                return (
-                  <button
-                    disabled
-                    title="上課開始後才能填寫"
-                    className="flex flex-col items-center justify-center py-2 rounded-lg text-slate-300 cursor-not-allowed"
-                  >
-                    <FileText size={16} className="mb-1" />
-                    <span className="text-xs font-bold">課堂紀錄</span>
-                  </button>
-                );
-              }
-            })()}
-
+        <div className="grid grid-cols-4 gap-2 pt-3 border-t border-slate-100">
+          {/* 編輯時間 */}
+          {!isPast ? (
             <button
               onClick={() =>
-                setReportModal({
+                setEditClassModal({
                   isOpen: true,
                   classId: cls.id,
-                  classDate: cls.class_date.split("T")[0],
+                  date: dateStr,
                   startTime: cls.start_time.substring(0, 5),
                   endTime: cls.end_time.substring(0, 5),
                 })
               }
-              className="flex flex-col items-center justify-center py-2 rounded-lg text-slate-500 hover:bg-red-50 hover:text-red-600 transition"
+              className="flex flex-col items-center justify-center py-2 rounded-lg text-slate-500 hover:bg-blue-50 hover:text-blue-600 transition"
             >
-              <Flag size={16} className="mb-1" />
-              <span className="text-xs font-bold">異常回報</span>
+              <Edit size={16} className="mb-1" />
+              <span className="text-xs font-bold">編輯時間</span>
             </button>
-          </div>
+          ) : (
+            <button
+              disabled
+              className="flex flex-col items-center justify-center py-2 rounded-lg text-slate-300 cursor-not-allowed"
+            >
+              <Edit size={16} className="mb-1" />
+              <span className="text-xs font-bold">不可編輯</span>
+            </button>
+          )}
+
+          {/* 簽到 */}
+          {isSigned ? (
+            <button
+              disabled
+              className="flex flex-col items-center justify-center py-2 rounded-lg text-green-600 bg-green-50 cursor-default"
+            >
+              <CheckSquare size={16} className="mb-1" />
+              <span className="text-xs font-bold">已簽到 ✓</span>
+            </button>
+          ) : isDeadlinePassed ? (
+            <button
+              onClick={() => setMakeupModal({ isOpen: true, classId: cls.id })}
+              className="flex flex-col items-center justify-center py-2 rounded-lg text-red-500 hover:bg-red-50 transition"
+            >
+              <CheckSquare size={16} className="mb-1" />
+              <span className="text-xs font-bold">補簽到</span>
+            </button>
+          ) : (
+            <button
+              onClick={() => handleCheckin(cls.id)}
+              disabled={!canCheckin}
+              className={`flex flex-col items-center justify-center py-2 rounded-lg transition ${canCheckin ? "text-slate-500 hover:bg-orange-50 hover:text-orange-600" : "text-slate-300 cursor-not-allowed"}`}
+            >
+              <CheckSquare size={16} className="mb-1" />
+              <span className="text-xs font-bold">老師簽到</span>
+            </button>
+          )}
+
+          {/* 課堂紀錄 */}
+          {(() => {
+            const canFillNote = now >= classStart;
+            const isNoteDeadlinePassed = now > deadline;
+            if (cls.has_note)
+              return (
+                <button
+                  onClick={() => handleOpenNotesModal(cls)}
+                  className="flex flex-col items-center justify-center py-2 rounded-lg text-green-600 bg-green-50 transition"
+                >
+                  <FileText size={16} className="mb-1" />
+                  <span className="text-xs font-bold">已填寫 ✓</span>
+                </button>
+              );
+            if (isNoteDeadlinePassed)
+              return (
+                <button
+                  onClick={() => handleOpenNotesModal(cls)}
+                  className="flex flex-col items-center justify-center py-2 rounded-lg text-red-500 hover:bg-red-50 transition"
+                >
+                  <FileText size={16} className="mb-1" />
+                  <span className="text-xs font-bold">補填紀錄</span>
+                </button>
+              );
+            if (canFillNote)
+              return (
+                <button
+                  onClick={() => handleOpenNotesModal(cls)}
+                  className="flex flex-col items-center justify-center py-2 rounded-lg text-slate-500 hover:bg-green-50 hover:text-green-600 transition"
+                >
+                  <FileText size={16} className="mb-1" />
+                  <span className="text-xs font-bold">課堂紀錄</span>
+                </button>
+              );
+            return (
+              <button
+                disabled
+                title="上課開始後才能填寫"
+                className="flex flex-col items-center justify-center py-2 rounded-lg text-slate-300 cursor-not-allowed"
+              >
+                <FileText size={16} className="mb-1" />
+                <span className="text-xs font-bold">課堂紀錄</span>
+              </button>
+            );
+          })()}
+
+          {/* 異常回報 */}
+          <button
+            onClick={() =>
+              setReportModal({
+                isOpen: true,
+                classId: cls.id,
+                classDate: cls.class_date.split("T")[0],
+                startTime: cls.start_time.substring(0, 5),
+                endTime: cls.end_time.substring(0, 5),
+              })
+            }
+            className="flex flex-col items-center justify-center py-2 rounded-lg text-slate-500 hover:bg-red-50 hover:text-red-600 transition"
+          >
+            <Flag size={16} className="mb-1" />
+            <span className="text-xs font-bold">異常回報</span>
+          </button>
         </div>
-      );
-    };
+      </div>
+    );
+  };
+
+  // ═══════════════════════════════════════════════════════
+  // 渲染：各頁面
+  // ═══════════════════════════════════════════════════════
+  const renderHome = () => {
+    const now = new Date();
+    const pastClasses = [],
+      upcomingAndFuture = [];
+    classes.forEach((cls) => {
+      const dateStr = cls.class_date.split("T")[0];
+      new Date(`${dateStr}T${cls.end_time}`) < now
+        ? pastClasses.push(cls)
+        : upcomingAndFuture.push(cls);
+    });
+    pastClasses.sort((a, b) => new Date(b.class_date) - new Date(a.class_date));
+    upcomingAndFuture.sort(
+      (a, b) => new Date(a.class_date) - new Date(b.class_date),
+    );
+    const upcomingClass = upcomingAndFuture[0] || null;
+    const futureClasses = upcomingAndFuture.slice(1);
 
     return (
       <>
@@ -832,9 +966,8 @@ function TutorDashboard() {
               )}
             </div>
           </div>
-
           {futureClasses.length > 0 && (
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden mt-2">
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
               <div className="bg-white px-6 py-3 border-b border-slate-100">
                 <h2 className="text-sm font-bold text-slate-600 tracking-wider">
                   未來上課 Future Classes
@@ -845,9 +978,8 @@ function TutorDashboard() {
               </div>
             </div>
           )}
-
           {pastClasses.length > 0 && (
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden mt-2">
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
               <div className="bg-white px-6 py-3 border-b border-slate-100">
                 <h2 className="text-sm font-bold text-slate-600 tracking-wider">
                   過去上課 Past Classes
@@ -859,80 +991,65 @@ function TutorDashboard() {
             </div>
           )}
         </main>
-        <aside className="hidden xl:flex w-72 flex-col gap-6 flex-shrink-0 animate-fade-in"></aside>
+        <aside className="hidden xl:flex w-72 flex-col gap-6 flex-shrink-0" />
       </>
     );
   };
 
-  // --- 介面 2：審查檔案庫 ---
   const renderReviews = () => (
     <main className="flex-grow w-full bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden animate-fade-in">
-      <div className="bg-slate-50 px-8 py-5 border-b border-slate-100 flex justify-between items-center">
+      <div className="bg-slate-50 px-8 py-5 border-b border-slate-100">
         <h2 className="font-bold text-lg text-slate-800 flex items-center">
           <FileCheck size={22} className="mr-2 text-primary" /> 審查結果追蹤
         </h2>
       </div>
-      <div className="p-8 space-y-10">
-        <section>
-          <div className="flex justify-between items-end mb-4 border-b border-slate-100 pb-2">
-            <h3 className="font-bold text-slate-700 flex items-center text-lg">
-              <Award className="mr-2 text-orange-500" size={20} /> 1. 資格證明
-            </h3>
+      <div className="p-8">
+        <div className="flex justify-between items-end mb-4 border-b border-slate-100 pb-2">
+          <h3 className="font-bold text-slate-700 flex items-center text-lg">
+            <Award className="mr-2 text-orange-500" size={20} /> 1. 資格證明
+          </h3>
+        </div>
+        {userInfo.certification_file ? (
+          <div className="p-4 border border-slate-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between bg-white hover:shadow-md transition gap-4">
+            <div className="flex items-center overflow-hidden">
+              <FileText
+                className="text-slate-400 mr-3 flex-shrink-0"
+                size={24}
+              />
+              <p className="font-bold text-slate-700 truncate max-w-xs">
+                {userInfo.certification_file}
+              </p>
+            </div>
+            <div className="flex-shrink-0">
+              {userInfo.certification_status === "pending" && (
+                <span className="px-4 py-1.5 bg-amber-100 text-amber-700 font-bold text-sm rounded-full flex items-center">
+                  <Clock size={16} className="mr-1.5" /> 審查中
+                </span>
+              )}
+              {userInfo.certification_status === "approved" && (
+                <span className="px-4 py-1.5 bg-green-100 text-green-700 font-bold text-sm rounded-full flex items-center">
+                  <CheckCircle size={16} className="mr-1.5" /> 已通過
+                </span>
+              )}
+              {userInfo.certification_status === "resubmit" && (
+                <span className="px-4 py-1.5 bg-red-100 text-red-700 font-bold text-sm rounded-full flex items-center">
+                  <AlertCircle size={16} className="mr-1.5" /> 需補件
+                </span>
+              )}
+            </div>
           </div>
-          <div className="space-y-3">
-            {userInfo.certification_file ? (
-              <div className="p-4 border border-slate-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between bg-white hover:shadow-md transition gap-4">
-                <div className="flex items-center overflow-hidden">
-                  <FileText
-                    className="text-slate-400 mr-3 flex-shrink-0"
-                    size={24}
-                  />
-                  <p className="font-bold text-slate-700 truncate max-w-[200px] sm:max-w-xs md:max-w-md">
-                    {userInfo.certification_file}
-                  </p>
-                </div>
-                <div className="flex-shrink-0">
-                  {userInfo.certification_status === "pending" && (
-                    <span className="px-4 py-1.5 bg-amber-100 text-amber-700 font-bold text-sm rounded-full flex items-center">
-                      <Clock size={16} className="mr-1.5" /> 審查中
-                    </span>
-                  )}
-                  {userInfo.certification_status === "approved" && (
-                    <span className="px-4 py-1.5 bg-green-100 text-green-700 font-bold text-sm rounded-full flex items-center">
-                      <CheckCircle size={16} className="mr-1.5" /> 已通過
-                    </span>
-                  )}
-                  {userInfo.certification_status === "resubmit" && (
-                    <span className="px-4 py-1.5 bg-red-100 text-red-700 font-bold text-sm rounded-full flex items-center">
-                      <AlertCircle size={16} className="mr-1.5" /> 需補件
-                    </span>
-                  )}
-                </div>
-              </div>
-            ) : (
-              <div className="p-6 border-2 border-slate-100 border-dashed rounded-xl text-center">
-                <p className="text-slate-400 text-sm font-medium">
-                  尚未上傳資格證明
-                </p>
-              </div>
-            )}
+        ) : (
+          <div className="p-6 border-2 border-slate-100 border-dashed rounded-xl text-center">
+            <p className="text-slate-400 text-sm font-medium">
+              尚未上傳資格證明
+            </p>
           </div>
-        </section>
+        )}
       </div>
     </main>
   );
 
-  // --- 介面 3：尋找外籍生 ---
   const renderFindStudents = () => {
-    // 收集所有出現過的國籍
-    const nationalityOptions = [
-      "All",
-      ...Array.from(
-        new Set(tuteesList.map((t) => t.nationality).filter(Boolean)),
-      ),
-    ];
-
-    // 篩選邏輯
     const filteredTutees = tuteesList.filter((tutee) => {
       const skills =
         typeof tutee.target_skills === "string"
@@ -942,39 +1059,32 @@ function TutorDashboard() {
         typeof tutee.available_times === "string"
           ? JSON.parse(tutee.available_times)
           : tutee.available_times || { days: [], slots: [] };
-
-      // 國籍
       if (
         filterNationality !== "All" &&
         tutee.nationality !== filterNationality
       )
         return false;
-      // 性別
       if (filterGender !== "All" && tutee.gender !== filterGender) return false;
-      // 程度
       if (filterLevel !== "All" && tutee.overall_level !== filterLevel)
         return false;
-      // 技能（選了就要包含全部選中的）
       if (filterSkills.length > 0 && !filterSkills.every((s) => skills[s]))
         return false;
-      // 上課時間：只要有任一天或任一時段交集即符合
-      if (filterDays.length > 0) {
-        const tutee_days = times.days || [];
-        const hasDay = filterDays.some((d) => tutee_days.includes(d));
-        if (!hasDay) return false;
-      }
-      if (filterSlots.length > 0) {
-        const tutee_slots = times.slots || [];
-        const hasSlot = filterSlots.some((s) => tutee_slots.includes(s));
-        if (!hasSlot) return false;
-      }
+      if (
+        filterDays.length > 0 &&
+        !filterDays.some((d) => (times.days || []).includes(d))
+      )
+        return false;
+      if (
+        filterSlots.length > 0 &&
+        !filterSlots.some((s) => (times.slots || []).includes(s))
+      )
+        return false;
       return true;
     });
 
     return (
       <main className="flex-grow flex flex-col gap-6 animate-fade-in">
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden flex flex-col min-h-[600px]">
-          {/* 標題列 */}
           <div className="bg-slate-50 px-8 py-5 border-b border-slate-100 flex justify-between items-center">
             <h2 className="font-bold text-lg text-slate-800 flex items-center">
               <Search size={22} className="mr-2 text-primary" /> 尋找外籍生
@@ -984,14 +1094,9 @@ function TutorDashboard() {
             </h2>
             <button
               onClick={() => setFilterOpen(!filterOpen)}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold border transition ${
-                activeFilterCount > 0
-                  ? "bg-primary/10 text-primary border-primary/30"
-                  : "bg-white text-slate-600 border-slate-200 hover:border-slate-300"
-              }`}
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold border transition ${activeFilterCount > 0 ? "bg-primary/10 text-primary border-primary/30" : "bg-white text-slate-600 border-slate-200 hover:border-slate-300"}`}
             >
-              <Filter size={15} />
-              篩選條件
+              <Filter size={15} /> 篩選條件
               {activeFilterCount > 0 && (
                 <span className="px-1.5 py-0.5 bg-primary text-white text-[10px] font-black rounded-full">
                   {activeFilterCount}
@@ -1000,11 +1105,9 @@ function TutorDashboard() {
             </button>
           </div>
 
-          {/* 篩選面板（收合式） */}
           {filterOpen && (
             <div className="border-b border-slate-100 bg-slate-50/60 px-8 py-6">
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-                {/* 性別 */}
                 <div>
                   <label className="block text-xs font-bold text-slate-500 mb-2">
                     👤 性別
@@ -1019,19 +1122,13 @@ function TutorDashboard() {
                       <button
                         key={g.val}
                         onClick={() => setFilterGender(g.val)}
-                        className={`flex-1 py-2 rounded-lg text-xs font-bold border transition ${
-                          filterGender === g.val
-                            ? "bg-primary/10 text-primary border-primary/40"
-                            : "bg-white text-slate-500 border-slate-200 hover:border-slate-300"
-                        }`}
+                        className={`flex-1 py-2 rounded-lg text-xs font-bold border transition ${filterGender === g.val ? "bg-primary/10 text-primary border-primary/40" : "bg-white text-slate-500 border-slate-200 hover:border-slate-300"}`}
                       >
                         {g.label}
                       </button>
                     ))}
                   </div>
                 </div>
-
-                {/* 程度 */}
                 <div>
                   <label className="block text-xs font-bold text-slate-500 mb-2">
                     📊 華語程度
@@ -1042,18 +1139,22 @@ function TutorDashboard() {
                     className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-primary"
                   >
                     <option value="All">全部程度</option>
-                    <option value="不知道 (Unknown)">不知道 (Unknown)</option>
-                    <option value="N">N (零基礎)</option>
-                    <option value="A1">A1</option>
-                    <option value="A2">A2</option>
-                    <option value="B1">B1</option>
-                    <option value="B2">B2</option>
-                    <option value="C1">C1</option>
-                    <option value="C2">C2</option>
+                    {[
+                      "不知道 (Unknown)",
+                      "N",
+                      "A1",
+                      "A2",
+                      "B1",
+                      "B2",
+                      "C1",
+                      "C2",
+                    ].map((l) => (
+                      <option key={l} value={l}>
+                        {l}
+                      </option>
+                    ))}
                   </select>
                 </div>
-
-                {/* 想加強技能 */}
                 <div>
                   <label className="block text-xs font-bold text-slate-500 mb-2">
                     ✏️ 想加強的技能（可複選）
@@ -1065,19 +1166,13 @@ function TutorDashboard() {
                         onClick={() =>
                           toggleArr(filterSkills, setFilterSkills, k)
                         }
-                        className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition ${
-                          filterSkills.includes(k)
-                            ? "bg-orange-100 text-orange-600 border-orange-300"
-                            : "bg-white text-slate-500 border-slate-200 hover:border-orange-200"
-                        }`}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition ${filterSkills.includes(k) ? "bg-orange-100 text-orange-600 border-orange-300" : "bg-white text-slate-500 border-slate-200 hover:border-orange-200"}`}
                       >
                         {label}
                       </button>
                     ))}
                   </div>
                 </div>
-
-                {/* 上課時間 — 星期 */}
                 <div>
                   <label className="block text-xs font-bold text-slate-500 mb-2">
                     📅 有時間交集的星期（可複選）
@@ -1089,19 +1184,13 @@ function TutorDashboard() {
                         onClick={() =>
                           toggleArr(filterDays, setFilterDays, d.id)
                         }
-                        className={`flex-1 py-2 rounded-lg text-xs font-bold border transition ${
-                          filterDays.includes(d.id)
-                            ? "bg-blue-100 text-blue-600 border-blue-300"
-                            : "bg-white text-slate-500 border-slate-200 hover:border-blue-200"
-                        }`}
+                        className={`flex-1 py-2 rounded-lg text-xs font-bold border transition ${filterDays.includes(d.id) ? "bg-blue-100 text-blue-600 border-blue-300" : "bg-white text-slate-500 border-slate-200 hover:border-blue-200"}`}
                       >
                         {d.label}
                       </button>
                     ))}
                   </div>
                 </div>
-
-                {/* 上課時間 — 時段 */}
                 <div>
                   <label className="block text-xs font-bold text-slate-500 mb-2">
                     ⏰ 有時間交集的時段（可複選）
@@ -1113,11 +1202,7 @@ function TutorDashboard() {
                         onClick={() =>
                           toggleArr(filterSlots, setFilterSlots, s)
                         }
-                        className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition ${
-                          filterSlots.includes(s)
-                            ? "bg-blue-100 text-blue-600 border-blue-300"
-                            : "bg-white text-slate-500 border-slate-200 hover:border-blue-200"
-                        }`}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition ${filterSlots.includes(s) ? "bg-blue-100 text-blue-600 border-blue-300" : "bg-white text-slate-500 border-slate-200 hover:border-blue-200"}`}
                       >
                         {s}
                       </button>
@@ -1125,8 +1210,6 @@ function TutorDashboard() {
                   </div>
                 </div>
               </div>
-
-              {/* 清除篩選 */}
               {activeFilterCount > 0 && (
                 <div className="mt-4 pt-4 border-t border-slate-200 flex justify-end">
                   <button
@@ -1140,7 +1223,6 @@ function TutorDashboard() {
             </div>
           )}
 
-          {/* 學生卡片列表 */}
           <div className="p-6 grid grid-cols-1 xl:grid-cols-2 gap-6 bg-slate-50/30 flex-grow content-start">
             {filteredTutees.length > 0 ? (
               filteredTutees.map((tutee) => {
@@ -1157,7 +1239,6 @@ function TutorDashboard() {
                   btnState = "matched_others";
                 if (tutee.match_status === "pending")
                   btnState = "pending_others";
-
                 const genderLabel =
                   tutee.gender === "male"
                     ? "男 Male"
@@ -1166,29 +1247,18 @@ function TutorDashboard() {
                       : tutee.gender === "other"
                         ? "其他"
                         : "未提供";
-
                 return (
                   <div
                     key={tutee.tutee_user_id}
                     className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm hover:shadow-md transition flex flex-col"
                   >
-                    {/* 頂部：性別 + 程度 */}
                     <div className="flex justify-between items-start mb-4 pb-4 border-b border-slate-100">
                       <div className="flex flex-col gap-1.5">
-                        <div className="flex items-center gap-2">
-                          {/* 性別 badge */}
-                          <span
-                            className={`px-2 py-0.5 text-[10px] font-bold rounded ${
-                              tutee.gender === "female"
-                                ? "bg-pink-100 text-pink-600"
-                                : tutee.gender === "male"
-                                  ? "bg-sky-100 text-sky-600"
-                                  : "bg-slate-100 text-slate-500"
-                            }`}
-                          >
-                            {genderLabel}
-                          </span>
-                        </div>
+                        <span
+                          className={`px-2 py-0.5 text-[10px] font-bold rounded w-fit ${tutee.gender === "female" ? "bg-pink-100 text-pink-600" : tutee.gender === "male" ? "bg-sky-100 text-sky-600" : "bg-slate-100 text-slate-500"}`}
+                        >
+                          {genderLabel}
+                        </span>
                         <p className="text-xs text-slate-400 font-medium">
                           {tutee.student_id}
                         </p>
@@ -1202,9 +1272,7 @@ function TutorDashboard() {
                         </span>
                       </div>
                     </div>
-
                     <div className="space-y-4 flex-grow">
-                      {/* 想加強的技巧 */}
                       <div>
                         <span className="text-xs font-bold text-slate-400 flex items-center mb-1.5">
                           <Award size={14} className="mr-1" /> 想加強的技巧
@@ -1214,11 +1282,7 @@ function TutorDashboard() {
                             v ? (
                               <span
                                 key={k}
-                                className={`px-2.5 py-1 text-xs font-bold border rounded-md ${
-                                  filterSkills.includes(k)
-                                    ? "bg-orange-100 text-orange-600 border-orange-300"
-                                    : "bg-orange-50 text-orange-600 border-orange-100"
-                                }`}
+                                className="px-2.5 py-1 text-xs font-bold border rounded-md bg-orange-50 text-orange-600 border-orange-100"
                               >
                                 {SKILL_MAP[k]}
                               </span>
@@ -1226,57 +1290,36 @@ function TutorDashboard() {
                           )}
                         </div>
                       </div>
-
-                      {/* 希望上課時間 */}
                       <div>
                         <span className="text-xs font-bold text-slate-400 flex items-center mb-1.5">
                           <Clock size={14} className="mr-1" /> 希望上課時間
                         </span>
                         <div className="flex flex-wrap gap-2">
-                          {times.days &&
-                            times.days.map((d) => (
-                              <span
-                                key={d}
-                                className={`px-2 py-1 text-xs font-bold rounded ${
-                                  filterDays.includes(d)
-                                    ? "bg-blue-100 text-blue-600"
-                                    : "bg-slate-100 text-slate-600"
-                                }`}
-                              >
-                                {DAYS_MAP[d]}
-                              </span>
-                            ))}
-                          {times.days &&
-                            times.slots &&
-                            times.days.length > 0 &&
-                            times.slots.length > 0 && (
+                          {(times.days || []).map((d) => (
+                            <span
+                              key={d}
+                              className="px-2 py-1 text-xs font-bold rounded bg-slate-100 text-slate-600"
+                            >
+                              {DAYS_MAP[d]}
+                            </span>
+                          ))}
+                          {(times.days || []).length > 0 &&
+                            (times.slots || []).length > 0 && (
                               <span className="text-slate-300 font-bold px-1">
                                 |
                               </span>
                             )}
-                          {times.slots &&
-                            times.slots.map((s) => (
-                              <span
-                                key={s}
-                                className={`px-2 py-1 text-xs font-bold rounded ${
-                                  filterSlots.includes(s)
-                                    ? "bg-blue-100 text-blue-600"
-                                    : "bg-slate-100 text-slate-600"
-                                }`}
-                              >
-                                {s}
-                              </span>
-                            ))}
-                          {(!times.days || times.days.length === 0) &&
-                            (!times.slots || times.slots.length === 0) && (
-                              <span className="text-slate-400 text-sm italic">
-                                未設定時間
-                              </span>
-                            )}
+                          {(times.slots || []).map((s) => (
+                            <span
+                              key={s}
+                              className="px-2 py-1 text-xs font-bold rounded bg-slate-100 text-slate-600"
+                            >
+                              {s}
+                            </span>
+                          ))}
                         </div>
                       </div>
                     </div>
-
                     <div className="mt-6 pt-4 border-t border-slate-100 flex items-center justify-between">
                       <span className="text-xs font-bold text-slate-400">
                         學習時長：{tutee.learning_duration || "未提供"}
@@ -1286,7 +1329,7 @@ function TutorDashboard() {
                           onClick={() =>
                             handleSendRequest(
                               tutee.tutee_user_id,
-                              tutee.englishName,
+                              tutee.english_name,
                             )
                           }
                           className="flex items-center px-4 py-2 bg-primary text-white text-sm font-bold rounded-lg hover:bg-primary-dark transition shadow-sm"
@@ -1332,7 +1375,6 @@ function TutorDashboard() {
     );
   };
 
-  // --- 介面 4：我的學生 ---
   const renderMyStudent = () => {
     if (userInfo.matched_tutee_id && matchedTutee) {
       const skills =
@@ -1373,6 +1415,18 @@ function TutorDashboard() {
                   {matchedTutee.student_id} / {matchedTutee.department}
                 </p>
                 <h4 className="text-sm font-bold text-slate-400 mb-1">
+                  性別 Gender
+                </h4>
+                <p className="font-medium text-slate-700 mb-4">
+                  {matchedTutee.gender === "male"
+                    ? "男 Male"
+                    : matchedTutee.gender === "female"
+                      ? "女 Female"
+                      : matchedTutee.gender === "other"
+                        ? "非二元性別 Non-binary"
+                        : "未提供"}
+                </p>
+                <h4 className="text-sm font-bold text-slate-400 mb-1">
                   國家 Nationality
                 </h4>
                 <p className="font-medium text-slate-700 mb-4">
@@ -1381,9 +1435,16 @@ function TutorDashboard() {
                 <h4 className="text-sm font-bold text-slate-400 mb-1">
                   聯絡方式 Email
                 </h4>
-                <p className="font-medium text-primary hover:underline cursor-pointer">
+                <p className="font-medium text-primary hover:underline cursor-pointer mb-4">
                   {matchedTutee.email || "未提供 Email"}
                 </p>
+                {/* ── 私訊按鈕 ── */}
+                <button
+                  onClick={() => setChatOpen(true)}
+                  className="flex items-center gap-2 px-5 py-2.5 bg-primary text-white font-bold rounded-xl shadow-sm hover:bg-primary-dark transition"
+                >
+                  <MessageSquare size={18} /> 傳送私訊
+                </button>
               </div>
               <div className="bg-slate-50 p-6 rounded-xl border border-slate-100">
                 <div className="flex gap-6 mb-5 border-b border-slate-200 pb-5">
@@ -1414,15 +1475,14 @@ function TutorDashboard() {
                       📅 星期 Days
                     </span>
                     <div className="flex flex-wrap gap-2">
-                      {times.days &&
-                        times.days.map((d) => (
-                          <span
-                            key={d}
-                            className="px-3 py-1 bg-slate-50 border border-slate-200 text-slate-600 text-sm font-bold rounded-md"
-                          >
-                            {DAYS_MAP[d] || d}
-                          </span>
-                        ))}
+                      {(times.days || []).map((d) => (
+                        <span
+                          key={d}
+                          className="px-3 py-1 bg-slate-50 border border-slate-200 text-slate-600 text-sm font-bold rounded-md"
+                        >
+                          {DAYS_MAP[d] || d}
+                        </span>
+                      ))}
                       {(!times.days || times.days.length === 0) && (
                         <span className="text-slate-400 text-sm italic">
                           未設定
@@ -1435,15 +1495,14 @@ function TutorDashboard() {
                       ⏰ 時段 Time Slots
                     </span>
                     <div className="flex flex-wrap gap-2">
-                      {times.slots &&
-                        times.slots.map((s) => (
-                          <span
-                            key={s}
-                            className="px-3 py-1 bg-slate-50 border border-slate-200 text-slate-600 text-sm font-bold rounded-md"
-                          >
-                            {s}
-                          </span>
-                        ))}
+                      {(times.slots || []).map((s) => (
+                        <span
+                          key={s}
+                          className="px-3 py-1 bg-slate-50 border border-slate-200 text-slate-600 text-sm font-bold rounded-md"
+                        >
+                          {s}
+                        </span>
+                      ))}
                       {(!times.slots || times.slots.length === 0) && (
                         <span className="text-slate-400 text-sm italic">
                           未設定
@@ -1505,7 +1564,6 @@ function TutorDashboard() {
     );
   };
 
-  // --- 介面 5：課表 ---
   const renderSchedule = () => (
     <main className="flex-grow w-full bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden animate-fade-in flex flex-col">
       <div className="bg-slate-50 px-8 py-5 border-b border-slate-100 flex justify-between items-center">
@@ -1527,9 +1585,7 @@ function TutorDashboard() {
             <div className="flex flex-col sm:flex-row items-center justify-between p-5 bg-white border border-slate-200 rounded-xl shadow-sm hover:border-primary/30 transition gap-4">
               <div className="flex items-center gap-4 w-full sm:w-auto">
                 <div className="w-12 h-12 bg-green-100 text-green-600 rounded-full flex items-center justify-center font-bold text-lg flex-shrink-0">
-                  {matchedTutee.english_name
-                    ? matchedTutee.english_name.charAt(0).toUpperCase()
-                    : "S"}
+                  {matchedTutee.english_name?.charAt(0).toUpperCase() || "S"}
                 </div>
                 <div>
                   <h4 className="font-bold text-slate-800 text-lg">
@@ -1567,33 +1623,26 @@ function TutorDashboard() {
             <div className="space-y-4">
               {classes.map((cls, index) => {
                 const dateStr = cls.class_date.split("T")[0];
-                const now = new Date();
-                const classEndTime = new Date(`${dateStr}T${cls.end_time}`);
-                const isPast = classEndTime < now;
+                const [y, m, d] = dateStr.split("-").map(Number);
+                const displayDate = new Date(y, m - 1, d);
+                const isPast =
+                  new Date(`${dateStr}T${cls.end_time}`) < new Date();
                 return (
                   <div
                     key={cls.id}
-                    className={`flex items-center p-4 border rounded-xl shadow-sm transition group ${isPast ? "bg-slate-50 border-slate-200 opacity-75" : "bg-white border-slate-100 hover:bg-slate-50"}`}
+                    className={`flex items-center p-4 border rounded-xl shadow-sm transition ${isPast ? "bg-slate-50 border-slate-200 opacity-75" : "bg-white border-slate-100 hover:bg-slate-50"}`}
                   >
                     <div
                       className={`w-16 h-16 rounded-xl flex flex-col items-center justify-center mr-6 flex-shrink-0 ${isPast ? "bg-slate-200 text-slate-500" : "bg-blue-50 border border-blue-100 text-blue-600"}`}
                     >
-                      {(() => {
-                        const [y, m, d] = dateStr.split("-").map(Number);
-                        const displayDate = new Date(y, m - 1, d);
-                        return (
-                          <>
-                            <span className="text-xs font-bold uppercase">
-                              {displayDate.toLocaleDateString("en-US", {
-                                month: "short",
-                              })}
-                            </span>
-                            <span className="text-xl font-black">
-                              {displayDate.getDate()}
-                            </span>
-                          </>
-                        );
-                      })()}
+                      <span className="text-xs font-bold uppercase">
+                        {displayDate.toLocaleDateString("en-US", {
+                          month: "short",
+                        })}
+                      </span>
+                      <span className="text-xl font-black">
+                        {displayDate.getDate()}
+                      </span>
                     </div>
                     <div className="flex-grow">
                       <h4 className="font-bold text-slate-800 text-lg">
@@ -1609,7 +1658,7 @@ function TutorDashboard() {
                       <div className="flex items-center gap-2 flex-shrink-0">
                         <button
                           disabled
-                          className="p-2 text-slate-300 cursor-not-allowed rounded-lg mr-2"
+                          className="p-2 text-slate-300 cursor-not-allowed rounded-lg"
                         >
                           <Edit size={18} />
                         </button>
@@ -1629,7 +1678,7 @@ function TutorDashboard() {
                               endTime: cls.end_time.substring(0, 5),
                             })
                           }
-                          className="p-2 text-slate-400 hover:bg-blue-50 hover:text-blue-600 rounded-lg transition mr-2"
+                          className="p-2 text-slate-400 hover:bg-blue-50 hover:text-blue-600 rounded-lg transition"
                         >
                           <Edit size={18} />
                         </button>
@@ -1646,6 +1695,7 @@ function TutorDashboard() {
         </div>
       </div>
 
+      {/* 排課 Modal */}
       {isScheduleModalOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-fade-in">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
@@ -1807,50 +1857,26 @@ function TutorDashboard() {
     </main>
   );
 
-  // --- 介面 6：輔導時數 ─────────────────────────────────────
   const renderHours = () => {
     const TARGET_HOURS = 100;
     const pct = Math.min((approvedHours / TARGET_HOURS) * 100, 100);
-
     const rows = hoursData.map((r) => {
-      const hasSigned = !!r.tutor_signed_at;
-      const hasNote = !!r.note_id;
-      const hrs = parseFloat(r.hours || 0);
-      const dateStr = r.class_date;
-      const [y, m, d] = dateStr.split("-").map(Number);
-      const displayDate = new Date(y, m - 1, d);
-      return { ...r, hasSigned, hasNote, hrs, displayDate };
+      const [y, m, d] = r.class_date.split("-").map(Number);
+      return {
+        ...r,
+        hasSigned: !!r.tutor_signed_at,
+        hasNote: !!r.note_id,
+        hrs: parseFloat(r.hours || 0),
+        displayDate: new Date(y, m - 1, d),
+      };
     });
-
-    const handleApplyCert = async () => {
-      if (!window.confirm("確認申請實習時數證明？申請後請等待管理員審核。"))
-        return;
-      try {
-        const res = await fetch(
-          "http://localhost:3001/api/tutor/apply-certificate",
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ userId: userInfo.user_id }),
-          },
-        );
-        const data = await res.json();
-        alert(data.message);
-        if (data.success) fetchCertStatus(userInfo.user_id);
-      } catch {
-        alert("連線錯誤");
-      }
-    };
-
     const statusBadge = (row) => {
-      // 簽到 + 紀錄都有 → 直接計入
       if (row.hasSigned && row.hasNote)
         return (
           <span className="px-2.5 py-1 bg-green-100 text-green-700 text-xs font-bold rounded-full flex items-center gap-1 w-fit">
             <CheckCircle size={12} /> 已計入
           </span>
         );
-      // 缺簽到或缺紀錄
       return (
         <span className="px-2.5 py-1 bg-slate-100 text-slate-500 text-xs font-bold rounded-full w-fit">
           {!row.hasSigned && !row.hasNote
@@ -1861,7 +1887,6 @@ function TutorDashboard() {
         </span>
       );
     };
-
     const certButton = () => {
       if (certStatus === "issued")
         return (
@@ -1879,14 +1904,9 @@ function TutorDashboard() {
         <button
           onClick={handleApplyCert}
           disabled={approvedHours < TARGET_HOURS}
-          className={`px-6 py-3 font-bold rounded-xl transition shadow-md flex items-center gap-2 ${
-            approvedHours >= TARGET_HOURS
-              ? "bg-primary text-white hover:bg-primary-dark"
-              : "bg-slate-200 text-slate-400 cursor-not-allowed"
-          }`}
+          className={`px-6 py-3 font-bold rounded-xl transition shadow-md flex items-center gap-2 ${approvedHours >= TARGET_HOURS ? "bg-primary text-white hover:bg-primary-dark" : "bg-slate-200 text-slate-400 cursor-not-allowed"}`}
         >
-          <Award size={18} />
-          申請實習時數證明
+          <Award size={18} /> 申請實習時數證明
           {approvedHours < TARGET_HOURS && (
             <span className="text-xs font-normal ml-1">
               （還差 {(TARGET_HOURS - approvedHours).toFixed(1)} 小時）
@@ -1895,10 +1915,8 @@ function TutorDashboard() {
         </button>
       );
     };
-
     return (
       <main className="flex-grow w-full flex flex-col gap-6 animate-fade-in">
-        {/* 時數進度卡 */}
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
           <div className="bg-gradient-to-r from-slate-700 to-slate-500 px-8 py-5">
             <h2 className="font-bold text-white text-lg flex items-center gap-2">
@@ -1917,21 +1935,14 @@ function TutorDashboard() {
                 / {TARGET_HOURS} 小時
               </span>
               <span
-                className={`ml-auto text-sm font-bold px-3 py-1.5 rounded-full ${
-                  pct >= 100
-                    ? "bg-green-100 text-green-700"
-                    : "bg-slate-100 text-slate-500"
-                }`}
+                className={`ml-auto text-sm font-bold px-3 py-1.5 rounded-full ${pct >= 100 ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-500"}`}
               >
                 {pct >= 100 ? "🎉 已達標！" : `${pct.toFixed(1)}%`}
               </span>
             </div>
-            {/* 進度條 */}
             <div className="w-full bg-slate-100 rounded-full h-5 overflow-hidden">
               <div
-                className={`h-5 rounded-full transition-all duration-700 ${
-                  pct >= 100 ? "bg-green-500" : "bg-primary"
-                }`}
+                className={`h-5 rounded-full transition-all duration-700 ${pct >= 100 ? "bg-green-500" : "bg-primary"}`}
                 style={{ width: `${pct}%` }}
               />
             </div>
@@ -1944,8 +1955,6 @@ function TutorDashboard() {
             </div>
           </div>
         </div>
-
-        {/* 課堂時數明細 */}
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
           <div className="bg-slate-50 px-8 py-4 border-b border-slate-100 flex justify-between items-center">
             <h3 className="font-bold text-slate-700 flex items-center gap-2">
@@ -1955,7 +1964,6 @@ function TutorDashboard() {
               共 {rows.length} 堂課
             </span>
           </div>
-
           {rows.length === 0 ? (
             <div className="py-16 text-center text-slate-400 font-medium">
               <Calendar size={40} className="mx-auto mb-3 text-slate-200" />
@@ -1963,7 +1971,6 @@ function TutorDashboard() {
             </div>
           ) : (
             <div className="divide-y divide-slate-100">
-              {/* 表頭（桌面版） */}
               <div className="hidden md:grid grid-cols-[2fr_1fr_1fr_1fr_1.5fr] px-6 py-3 bg-slate-50/80 text-xs font-bold text-slate-400 uppercase tracking-wider">
                 <span>日期 / 時間</span>
                 <span>時長</span>
@@ -1971,27 +1978,13 @@ function TutorDashboard() {
                 <span>課堂紀錄</span>
                 <span>審查狀態</span>
               </div>
-
               {rows.map((row) => (
                 <div
                   key={row.class_id}
-                  className={`grid grid-cols-1 md:grid-cols-[2fr_1fr_1fr_1fr_1.5fr] px-6 py-4 items-center gap-3 transition ${
-                    row.review_status === "approved"
-                      ? "bg-green-50/40"
-                      : row.review_status === "rejected"
-                        ? "bg-red-50/20"
-                        : "hover:bg-slate-50"
-                  }`}
+                  className="grid grid-cols-1 md:grid-cols-[2fr_1fr_1fr_1fr_1.5fr] px-6 py-4 items-center gap-3 hover:bg-slate-50 transition"
                 >
-                  {/* 日期 */}
                   <div className="flex items-center gap-3">
-                    <div
-                      className={`w-11 h-11 rounded-xl flex flex-col items-center justify-center flex-shrink-0 ${
-                        row.review_status === "approved"
-                          ? "bg-green-100 text-green-700"
-                          : "bg-slate-100 text-slate-500"
-                      }`}
-                    >
+                    <div className="w-11 h-11 bg-slate-100 text-slate-500 rounded-xl flex flex-col items-center justify-center flex-shrink-0">
                       <span className="text-[9px] font-bold uppercase">
                         {row.displayDate.toLocaleDateString("en-US", {
                           month: "short",
@@ -2011,22 +2004,12 @@ function TutorDashboard() {
                       </p>
                     </div>
                   </div>
-
-                  {/* 時長 */}
                   <div className="flex items-baseline gap-1">
-                    <span
-                      className={`font-black text-xl ${
-                        row.review_status === "approved"
-                          ? "text-green-600"
-                          : "text-slate-700"
-                      }`}
-                    >
+                    <span className="font-black text-xl text-slate-700">
                       {row.hrs.toFixed(1)}
                     </span>
                     <span className="text-xs text-slate-400 font-bold">hr</span>
                   </div>
-
-                  {/* 老師簽到 */}
                   <div>
                     {row.hasSigned ? (
                       <span className="flex items-center gap-1 text-green-600 text-xs font-bold">
@@ -2038,8 +2021,6 @@ function TutorDashboard() {
                       </span>
                     )}
                   </div>
-
-                  {/* 課堂紀錄 */}
                   <div>
                     {row.hasNote ? (
                       <span className="flex items-center gap-1 text-green-600 text-xs font-bold">
@@ -2051,16 +2032,12 @@ function TutorDashboard() {
                       </span>
                     )}
                   </div>
-
-                  {/* 審查狀態 */}
                   <div>{statusBadge(row)}</div>
                 </div>
               ))}
             </div>
           )}
         </div>
-
-        {/* 申請證書區 */}
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-8 flex flex-col sm:flex-row items-center justify-between gap-6">
           <div>
             <h3 className="font-bold text-slate-800 text-lg flex items-center gap-2">
@@ -2089,41 +2066,44 @@ function TutorDashboard() {
     );
   };
 
+  // ═══════════════════════════════════════════════════════
+  // JSX
+  // ═══════════════════════════════════════════════════════
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
+      {/* Header */}
       <header className="bg-white shadow-sm h-16 flex items-center justify-between px-6 sticky top-0 z-20">
         <div className="flex items-center space-x-8">
           <img src={logoImg} alt="Logo" className="h-8 w-auto object-contain" />
           <nav className="hidden md:flex space-x-1 bg-slate-100 p-1 rounded-lg">
-            <button
-              onClick={() => setActiveTab("home")}
-              className={`px-5 py-1.5 font-bold rounded-md shadow-sm text-sm transition ${activeTab === "home" ? "bg-white text-primary" : "text-slate-500 hover:text-primary"}`}
-            >
-              首頁
-            </button>
-            <button
-              onClick={() => setActiveTab("find-students")}
-              className={`px-5 py-1.5 font-bold rounded-md shadow-sm text-sm transition ${activeTab === "find-students" ? "bg-white text-primary" : "text-slate-500 hover:text-primary"}`}
-            >
-              尋找學生
-            </button>
-            <button
-              onClick={() => setActiveTab("schedule")}
-              className={`px-5 py-1.5 font-bold rounded-md shadow-sm text-sm transition ${activeTab === "schedule" ? "bg-white text-primary" : "text-slate-500 hover:text-primary"}`}
-            >
-              課表
-            </button>
-            <button
-              onClick={() => setActiveTab("hours")}
-              className={`px-5 py-1.5 font-bold rounded-md shadow-sm text-sm transition ${activeTab === "hours" ? "bg-white text-primary" : "text-slate-500 hover:text-primary"}`}
-            >
-              輔導時數
-            </button>
+            {[
+              ["home", "首頁"],
+              ["find-students", "尋找學生"],
+              ["schedule", "課表"],
+              ["hours", "輔導時數"],
+            ].map(([tab, label]) => (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className={`px-5 py-1.5 font-bold rounded-md shadow-sm text-sm transition ${activeTab === tab ? "bg-white text-primary" : "text-slate-500 hover:text-primary"}`}
+              >
+                {label}
+              </button>
+            ))}
           </nav>
         </div>
         <div className="flex items-center space-x-5">
-          <button className="text-slate-400 hover:text-primary transition">
+          {/* 私訊按鈕（右上角） */}
+          <button
+            onClick={() => setChatOpen((prev) => !prev)}
+            className="relative text-slate-400 hover:text-primary transition"
+          >
             <MessageSquare size={20} />
+            {unreadMsg > 0 && (
+              <span className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-500 text-white text-[10px] font-black rounded-full flex items-center justify-center animate-pulse">
+                {unreadMsg > 9 ? "9+" : unreadMsg}
+              </span>
+            )}
           </button>
           <button className="text-slate-400 hover:text-primary transition">
             <Bell size={20} />
@@ -2173,54 +2153,49 @@ function TutorDashboard() {
         </div>
       </header>
 
+      {/* 主內容 */}
       <div className="flex-grow flex flex-col md:flex-row max-w-7xl mx-auto w-full p-6 gap-8">
+        {/* Sidebar */}
         <aside className="w-full md:w-64 flex flex-col gap-6 flex-shrink-0">
           <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
             <h3 className="font-bold text-slate-800 mb-5 flex items-center text-lg">
               快速連結
             </h3>
             <ul className="space-y-2 text-sm font-medium">
-              <li
-                onClick={() => setActiveTab("home")}
-                className={`flex items-center p-3 rounded-xl cursor-pointer transition group ${activeTab === "home" ? "bg-primary/10 text-primary font-bold" : "text-slate-600 hover:bg-slate-50 hover:text-primary"}`}
-              >
-                <Home
-                  size={20}
-                  className={`mr-4 ${activeTab === "home" ? "text-primary" : "text-slate-400 group-hover:text-primary"}`}
-                />{" "}
-                首頁主控台
-              </li>
-              <li
-                onClick={() => navigate("/profile")}
-                className="flex items-center p-3 rounded-xl hover:bg-slate-50 hover:text-primary cursor-pointer transition group text-slate-600"
-              >
-                <User
-                  size={20}
-                  className="mr-4 text-slate-400 group-hover:text-primary"
-                />{" "}
-                個人資訊
-              </li>
-              <li
-                onClick={() => setActiveTab("my-student")}
-                className={`flex items-center p-3 rounded-xl cursor-pointer transition group ${activeTab === "my-student" ? "bg-primary/10 text-primary font-bold" : "text-slate-600 hover:bg-slate-50 hover:text-primary"}`}
-              >
-                <UserCheck
-                  size={20}
-                  className={`mr-4 ${activeTab === "my-student" ? "text-primary" : "text-slate-400 group-hover:text-primary"}`}
-                />{" "}
-                我的學生
-              </li>
-              <li
-                onClick={() => setActiveTab("schedule")}
-                className={`flex items-center p-3 rounded-xl cursor-pointer transition group ${activeTab === "schedule" ? "bg-primary/10 text-primary font-bold" : "text-slate-600 hover:bg-slate-50 hover:text-primary"}`}
-              >
-                <Calendar
-                  size={20}
-                  className={`mr-4 ${activeTab === "schedule" ? "text-primary" : "text-slate-400 group-hover:text-primary"}`}
-                />{" "}
-                課表
-              </li>
-              {/* ── 新增：輔導時數 ── */}
+              {[
+                { tab: "home", icon: <Home size={20} />, label: "首頁主控台" },
+                {
+                  tab: "profile",
+                  icon: <User size={20} />,
+                  label: "個人資訊",
+                  isNav: true,
+                },
+                {
+                  tab: "my-student",
+                  icon: <UserCheck size={20} />,
+                  label: "我的學生",
+                },
+                {
+                  tab: "schedule",
+                  icon: <Calendar size={20} />,
+                  label: "課表",
+                },
+              ].map(({ tab, icon, label, isNav }) => (
+                <li
+                  key={tab}
+                  onClick={() =>
+                    isNav ? navigate("/profile") : setActiveTab(tab)
+                  }
+                  className={`flex items-center p-3 rounded-xl cursor-pointer transition group ${activeTab === tab ? "bg-primary/10 text-primary font-bold" : "text-slate-600 hover:bg-slate-50 hover:text-primary"}`}
+                >
+                  <span
+                    className={`mr-4 ${activeTab === tab ? "text-primary" : "text-slate-400 group-hover:text-primary"}`}
+                  >
+                    {icon}
+                  </span>
+                  {label}
+                </li>
+              ))}
               <li
                 onClick={() => setActiveTab("hours")}
                 className={`flex items-center p-3 rounded-xl cursor-pointer transition group ${activeTab === "hours" ? "bg-primary/10 text-primary font-bold" : "text-slate-600 hover:bg-slate-50 hover:text-primary"}`}
@@ -2228,9 +2203,8 @@ function TutorDashboard() {
                 <Award
                   size={20}
                   className={`mr-4 ${activeTab === "hours" ? "text-primary" : "text-slate-400 group-hover:text-primary"}`}
-                />{" "}
+                />
                 輔導時數
-                {/* 進度小標籤 */}
                 {approvedHours > 0 && approvedHours < 100 && (
                   <span className="ml-auto text-[10px] bg-slate-100 text-slate-500 font-bold px-2 py-0.5 rounded-full">
                     {approvedHours.toFixed(0)}h
@@ -2249,10 +2223,10 @@ function TutorDashboard() {
                 <FileCheck
                   size={20}
                   className={`mr-4 ${activeTab === "reviews" ? "text-primary" : "text-slate-400 group-hover:text-primary"}`}
-                />{" "}
+                />
                 審查結果
                 {userInfo.certification_status === "resubmit" && (
-                  <span className="ml-auto w-2 h-2 bg-red-500 rounded-full shadow-sm"></span>
+                  <span className="ml-auto w-2 h-2 bg-red-500 rounded-full shadow-sm" />
                 )}
               </li>
               <li className="flex items-center p-3 rounded-xl hover:bg-slate-50 hover:text-primary cursor-pointer transition group text-slate-600">
@@ -2266,6 +2240,7 @@ function TutorDashboard() {
           </div>
         </aside>
 
+        {/* 主區域 */}
         {activeTab === "home"
           ? renderHome()
           : activeTab === "find-students"
@@ -2279,7 +2254,9 @@ function TutorDashboard() {
                   : renderReviews()}
       </div>
 
-      {/* 編輯課程 Modal */}
+      {/* ── Modals ── */}
+
+      {/* 編輯課程 */}
       {editClassModal.isOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-fade-in">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden flex flex-col">
@@ -2379,7 +2356,7 @@ function TutorDashboard() {
         </div>
       )}
 
-      {/* 補簽到 Modal */}
+      {/* 補簽到 */}
       {makeupModal.isOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
@@ -2450,7 +2427,7 @@ function TutorDashboard() {
         </div>
       )}
 
-      {/* 課堂紀錄 Modal */}
+      {/* 課堂紀錄 */}
       {notesModal.isOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
@@ -2605,7 +2582,7 @@ function TutorDashboard() {
         </div>
       )}
 
-      {/* 異常回報 Modal */}
+      {/* 異常回報 */}
       {reportModal.isOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
@@ -2740,6 +2717,21 @@ function TutorDashboard() {
             </form>
           </div>
         </div>
+      )}
+
+      {/* ── 聊天視窗 ── */}
+      {chatOpen && matchedTutee && (
+        <ChatWindow
+          myUserId={userInfo.user_id}
+          myAccount={userInfo.account}
+          partner={matchedTutee}
+          onClose={() => {
+            setChatOpen(false);
+            fetchUnreadMsg(userInfo.user_id);
+          }}
+          wsRef={wsRef}
+          onRead={() => fetchUnreadMsg(userInfo.user_id)}
+        />
       )}
 
       <footer className="bg-white border-t border-slate-200 py-4 px-6 flex justify-between items-center text-sm text-slate-500 mt-auto">

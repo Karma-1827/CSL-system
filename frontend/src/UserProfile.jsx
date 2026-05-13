@@ -153,11 +153,42 @@ function UserProfile() {
 
   // ✨ 補回被誤刪的通用儲存函式
   const handleSave = async (section) => {
-    // 這裡未來可以串接更新個人資訊的 API
-    // 目前先將編輯內容同步到 userInfo 中，並關閉編輯模式
-    setUserInfo({ ...editForm });
-    handleCancel(section);
-    alert("✅ 資料已暫存更新！");
+    try {
+      const res = await fetch("http://localhost:3001/api/profile/update", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          account: userInfo.account,
+          chineseName: editForm.chineseName,
+          englishName: editForm.englishName,
+          department: editForm.department,
+          phone: editForm.phone,
+          email: editForm.email,
+          nationality: editForm.nationality,
+          gender: editForm.gender,
+          levelListening: editForm.levelListening,
+          levelSpeaking: editForm.levelSpeaking,
+          levelReading: editForm.levelReading,
+          levelWriting: editForm.levelWriting,
+          teachingNotes: editForm.teachingNotes,
+          availableTimes: editForm.availableTimes,
+          overallLevel: editForm.overallLevel,
+          learningDuration: editForm.learningDuration,
+          targetSkills: editForm.targetSkills,
+          skillsToImprove: editForm.skillsToImprove,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setUserInfo({ ...editForm });
+        handleCancel(section);
+        alert("✅ 資料已成功更新！");
+      } else {
+        alert(`❌ 更新失敗：${data.message}`);
+      }
+    } catch (error) {
+      alert("無法連線到伺服器！");
+    }
   };
 
   // ✨ 專為「輔導需求 / 資格證明」寫的儲存函式
