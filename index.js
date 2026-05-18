@@ -565,6 +565,13 @@ app.post("/api/match/respond", async (req, res) => {
         "UPDATE tutor_profiles SET matched_tutee_id = $1 WHERE user_id = $2",
         [tuteeId, tutorUserId],
       );
+
+      await pool.query(
+        `INSERT INTO match_history (tutor_id, tutee_id, is_active)
+     VALUES ($1, $2, TRUE)
+     ON CONFLICT DO NOTHING`,
+        [tutorUserId, tuteeId],
+      );
       return res.json({ success: true, message: "🎉 配對成功！" });
     }
   } catch (error) {
@@ -1355,12 +1362,16 @@ app.get("/api/tutor/hours/:userId", async (req, res) => {
         c.start_time,
         c.end_time,
         c.tutor_signed_at,
+        c.tutee_id,
+        u.chinese_name  AS tutee_chinese_name,
+        u.english_name  AS tutee_english_name,
         cn.id           AS note_id,
         EXTRACT(EPOCH FROM (
           TO_TIMESTAMP(c.end_time::text,   'HH24:MI:SS') -
           TO_TIMESTAMP(c.start_time::text, 'HH24:MI:SS')
         )) / 3600.0     AS hours
       FROM classes c
+      LEFT JOIN users u ON c.tutee_id = u.id
       LEFT JOIN class_notes cn
         ON cn.class_id = c.id AND cn.user_id = $1
       WHERE c.tutor_id = $1
@@ -1370,7 +1381,6 @@ app.get("/api/tutor/hours/:userId", async (req, res) => {
       [userId],
     );
 
-    // 有簽到 + 有紀錄 → 直接計入
     const approvedHours = result.rows
       .filter((r) => r.tutor_signed_at && r.note_id)
       .reduce((sum, r) => sum + parseFloat(r.hours || 0), 0);
@@ -1875,6 +1885,19 @@ app.post("/api/messages/send", async (req, res) => {
   }
 });
 
+// 🚀 取得未讀訊息數 (GET)
+app.get("/api/messages/unread/:userId", async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT COUNT(*) FROM messages WHERE receiver_id = $1 AND is_read = FALSE",
+      [req.params.userId],
+    );
+    res.json({ success: true, count: parseInt(result.rows[0].count) });
+  } catch (error) {
+    res.status(500).json({ success: false, count: 0 });
+  }
+});
+
 // 🚀 取得兩人之間的對話紀錄 (GET)
 app.get("/api/messages/:userAId/:userBId", async (req, res) => {
   const { userAId, userBId } = req.params;
@@ -1902,15 +1925,279 @@ app.get("/api/messages/:userAId/:userBId", async (req, res) => {
   }
 });
 
-// 🚀 取得未讀訊息數 (GET)
-app.get("/api/messages/unread/:userId", async (req, res) => {
+// 🚀 取得 tutor 所有曾配對的 tutee 列表（含現在）
+app.get("/api/messages/contacts/tutor/:userId", async (req, res) => {
   try {
     const result = await pool.query(
-      "SELECT COUNT(*) FROM messages WHERE receiver_id = $1 AND is_read = FALSE",
+      `SELECT DISTINCT
+         u.id as user_id,
+         u.chinese_name,
+         u.english_name,
+         u.email,
+         mh.is_active,
+         mh.matched_at,
+         (
+           SELECT COUNT(*) FROM messages m
+           WHERE m.sender_id = u.id
+             AND m.receiver_id = $1
+             AND m.is_read = FALSE
+         ) as unread_count,
+         (
+           SELECT m.content FROM messages m
+           WHERE (m.sender_id = u.id AND m.receiver_id = $1)
+              OR (m.sender_id = $1 AND m.receiver_id = u.id)
+           ORDER BY m.created_at DESC LIMIT 1
+         ) as last_message,
+         (
+           SELECT m.created_at FROM messages m
+           WHERE (m.sender_id = u.id AND m.receiver_id = $1)
+              OR (m.sender_id = $1 AND m.receiver_id = u.id)
+           ORDER BY m.created_at DESC LIMIT 1
+         ) as last_message_at
+       FROM match_history mh
+       JOIN users u ON mh.tutee_id = u.id
+       WHERE mh.tutor_id = $1
+       ORDER BY last_message_at DESC NULLS LAST, mh.matched_at DESC`,
       [req.params.userId],
     );
-    res.json({ success: true, count: parseInt(result.rows[0].count) });
+    res.json({ success: true, data: result.rows });
   } catch (error) {
-    res.status(500).json({ success: false, count: 0 });
+    console.error("取得聯絡人列表失敗:", error);
+    res.status(500).json({ success: false });
+  }
+});
+
+// 🚀 取得 tutee 所有曾配對的 tutor 列表（含現在）
+app.get("/api/messages/contacts/tutee/:userId", async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT DISTINCT
+         u.id as user_id,
+         u.chinese_name,
+         u.english_name,
+         u.email,
+         mh.is_active,
+         mh.matched_at,
+         (
+           SELECT COUNT(*) FROM messages m
+           WHERE m.sender_id = u.id
+             AND m.receiver_id = $1
+             AND m.is_read = FALSE
+         ) as unread_count,
+         (
+           SELECT m.content FROM messages m
+           WHERE (m.sender_id = u.id AND m.receiver_id = $1)
+              OR (m.sender_id = $1 AND m.receiver_id = u.id)
+           ORDER BY m.created_at DESC LIMIT 1
+         ) as last_message,
+         (
+           SELECT m.created_at FROM messages m
+           WHERE (m.sender_id = u.id AND m.receiver_id = $1)
+              OR (m.sender_id = $1 AND m.receiver_id = u.id)
+           ORDER BY m.created_at DESC LIMIT 1
+         ) as last_message_at
+       FROM match_history mh
+       JOIN users u ON mh.tutor_id = u.id
+       WHERE mh.tutee_id = $1
+       ORDER BY last_message_at DESC NULLS LAST, mh.matched_at DESC`,
+      [req.params.userId],
+    );
+    res.json({ success: true, data: result.rows });
+  } catch (error) {
+    console.error("取得聯絡人列表失敗:", error);
+    res.status(500).json({ success: false });
+  }
+});
+
+// 🚀 提出解除配對申請 (POST)
+app.post("/api/unmatch/request", async (req, res) => {
+  const { userId, role, reason } = req.body;
+  if (!reason?.trim())
+    return res.status(400).json({ success: false, message: "請填寫解除原因" });
+
+  try {
+    // 找到配對對象
+    let tutor_id, tutee_id;
+    if (role === "tutor") {
+      const r = await pool.query(
+        "SELECT matched_tutee_id FROM tutor_profiles WHERE user_id = $1",
+        [userId],
+      );
+      if (!r.rows[0]?.matched_tutee_id)
+        return res
+          .status(400)
+          .json({ success: false, message: "目前沒有配對學生" });
+      tutor_id = userId;
+      tutee_id = r.rows[0].matched_tutee_id;
+    } else {
+      const r = await pool.query(
+        "SELECT matched_tutor_id FROM tutee_profiles WHERE user_id = $1",
+        [userId],
+      );
+      if (!r.rows[0]?.matched_tutor_id)
+        return res
+          .status(400)
+          .json({ success: false, message: "目前沒有配對老師" });
+      tutee_id = userId;
+      tutor_id = r.rows[0].matched_tutor_id;
+    }
+
+    // 避免重複申請
+    const dup = await pool.query(
+      "SELECT id FROM unmatch_requests WHERE requester_id = $1 AND status = 'pending'",
+      [userId],
+    );
+    if (dup.rows.length > 0)
+      return res
+        .status(400)
+        .json({ success: false, message: "您已有一筆待審核的解除申請" });
+
+    await pool.query(
+      `INSERT INTO unmatch_requests (requester_id, requester_role, tutor_id, tutee_id, reason)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [userId, role, tutor_id, tutee_id, reason],
+    );
+    res.json({
+      success: true,
+      message: "✅ 解除配對申請已送出，請等待管理員審核",
+    });
+  } catch (error) {
+    console.error("解除配對申請失敗:", error);
+    res.status(500).json({ success: false, message: "伺服器發生錯誤" });
+  }
+});
+
+// 🚀 查詢自己的解除申請狀態 (GET)
+app.get("/api/unmatch/status/:userId", async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, status, reason, created_at, reviewed_at
+       FROM unmatch_requests WHERE requester_id = $1
+       ORDER BY created_at DESC LIMIT 1`,
+      [req.params.userId],
+    );
+    res.json({ success: true, data: result.rows[0] || null });
+  } catch (error) {
+    res.status(500).json({ success: false });
+  }
+});
+
+// 🚀 管理員：查看所有解除配對申請 (GET)
+app.get("/api/admin/unmatch-requests", async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT
+        u.id, u.status, u.reason, u.requester_role, u.created_at, u.reviewed_at,
+        req.chinese_name AS requester_chinese_name,
+        req.english_name AS requester_english_name,
+        tor.chinese_name AS tutor_chinese_name,
+        tor.english_name AS tutor_english_name,
+        tee.chinese_name AS tutee_chinese_name,
+        tee.english_name AS tutee_english_name,
+        u.tutor_id, u.tutee_id
+      FROM unmatch_requests u
+      JOIN users req ON u.requester_id = req.id
+      JOIN users tor ON u.tutor_id = tor.id
+      JOIN users tee ON u.tutee_id = tee.id
+      ORDER BY u.created_at DESC
+    `);
+    res.json({ success: true, data: result.rows });
+  } catch (error) {
+    console.error("查詢解除申請失敗:", error);
+    res.status(500).json({ success: false });
+  }
+});
+
+// 🚀 管理員：審核解除配對申請 (POST)
+app.post("/api/admin/unmatch-requests/:id/review", async (req, res) => {
+  const { action } = req.body; // 'approved' | 'rejected'
+  try {
+    const reqRes = await pool.query(
+      "SELECT * FROM unmatch_requests WHERE id = $1",
+      [req.params.id],
+    );
+    const unmatch = reqRes.rows[0];
+    if (!unmatch)
+      return res.status(404).json({ success: false, message: "找不到申請" });
+
+    await pool.query(
+      "UPDATE unmatch_requests SET status = $1, reviewed_at = NOW() WHERE id = $2",
+      [action, req.params.id],
+    );
+
+    if (action === "approved") {
+      const { tutor_id, tutee_id } = unmatch;
+
+      // 清除配對關係
+      await pool.query(
+        "UPDATE tutor_profiles SET matched_tutee_id = NULL WHERE user_id = $1",
+        [tutor_id],
+      );
+      await pool.query(
+        "UPDATE tutee_profiles SET matched_tutor_id = NULL WHERE user_id = $1",
+        [tutee_id],
+      );
+
+      // 標記 match_history 為已結束
+      await pool.query(
+        `UPDATE match_history SET is_active = FALSE, ended_at = NOW()
+         WHERE tutor_id = $1 AND tutee_id = $2 AND is_active = TRUE`,
+        [tutor_id, tutee_id],
+      );
+
+      // 取消未來的課程（過去的保留，時數不受影響）
+      await pool.query(
+        `UPDATE classes SET status = 'cancelled'
+         WHERE tutor_id = $1 AND tutee_id = $2
+           AND class_date >= CURRENT_DATE
+           AND status != 'cancelled'`,
+        [tutor_id, tutee_id],
+      );
+    }
+
+    res.json({
+      success: true,
+      message:
+        action === "approved"
+          ? "✅ 已核准解除配對，未來課程已取消"
+          : "❌ 已駁回申請",
+    });
+  } catch (error) {
+    console.error("審核解除配對失敗:", error);
+    res.status(500).json({ success: false, message: "伺服器發生錯誤" });
+  }
+});
+
+// 🚀 外籍生：查詢上課紀錄 (GET)
+app.get("/api/tutee/classes-history/:userId", async (req, res) => {
+  const { userId } = req.params;
+  try {
+    const result = await pool.query(
+      `
+      SELECT
+        c.id            AS class_id,
+        c.class_date::text,
+        c.start_time,
+        c.end_time,
+        c.tutee_signed_at,
+        u.chinese_name  AS tutor_chinese_name,
+        u.english_name  AS tutor_english_name,
+        cn.id           AS note_id,
+        cn.content      AS note_content,
+        cn.location     AS note_location
+      FROM classes c
+      LEFT JOIN users u ON c.tutor_id = u.id
+      LEFT JOIN class_notes cn
+        ON cn.class_id = c.id AND cn.user_id = $1
+      WHERE c.tutee_id = $1
+        AND c.status != 'cancelled'
+      ORDER BY c.class_date DESC, c.start_time DESC
+      `,
+      [userId],
+    );
+    res.json({ success: true, data: result.rows });
+  } catch (error) {
+    console.error("查詢外籍生上課紀錄失敗:", error);
+    res.status(500).json({ success: false, message: "伺服器發生錯誤" });
   }
 });

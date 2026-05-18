@@ -93,11 +93,7 @@ function ChatWindow({ myUserId, myAccount, partner, onClose, wsRef, onRead }) {
     });
     setMessages((prev) => [
       ...prev,
-      {
-        sender_id: myUserId,
-        content,
-        created_at: new Date().toISOString(),
-      },
+      { sender_id: myUserId, content, created_at: new Date().toISOString() },
     ]);
   };
 
@@ -196,7 +192,6 @@ function TutorDashboard() {
 
   // 篩選
   const [filterOpen, setFilterOpen] = useState(false);
-  const [filterNationality, setFilterNationality] = useState("All");
   const [filterGender, setFilterGender] = useState("All");
   const [filterLevel, setFilterLevel] = useState("All");
   const [filterSkills, setFilterSkills] = useState([]);
@@ -218,7 +213,6 @@ function TutorDashboard() {
   const toggleArr = (arr, setArr, val) =>
     setArr(arr.includes(val) ? arr.filter((x) => x !== val) : [...arr, val]);
   const resetFilters = () => {
-    setFilterNationality("All");
     setFilterGender("All");
     setFilterLevel("All");
     setFilterSkills([]);
@@ -280,6 +274,8 @@ function TutorDashboard() {
   const [hoursData, setHoursData] = useState([]);
   const [approvedHours, setApprovedHours] = useState(0);
   const [certStatus, setCertStatus] = useState(null);
+  // 展開的課堂 id（點擊展開詳情）
+  const [expandedRow, setExpandedRow] = useState(null);
 
   // 異常回報
   const [reportModal, setReportModal] = useState({
@@ -296,9 +292,17 @@ function TutorDashboard() {
     file: null,
   });
 
-  // ── 私訊 / WebSocket ──
+  // 解除配對
+  const [unmatchModal, setUnmatchModal] = useState(false);
+  const [unmatchReason, setUnmatchReason] = useState("");
+  const [unmatchStatus, setUnmatchStatus] = useState(null);
+
+  // 私訊
   const [chatOpen, setChatOpen] = useState(false);
+  const [activeChat, setActiveChat] = useState(null);
   const [unreadMsg, setUnreadMsg] = useState(0);
+  const [msgDropdownOpen, setMsgDropdownOpen] = useState(false);
+  const [contacts, setContacts] = useState([]);
   const wsRef = useRef(null);
 
   // ─── fetch helpers ───
@@ -308,14 +312,12 @@ function TutorDashboard() {
       .then((res) => {
         if (res.success) setMakeupRemaining(res.remaining);
       });
-
   const fetchNotesRemaining = (userId) =>
     fetch(`http://localhost:3001/api/notes-remaining/${userId}`)
       .then((r) => r.json())
       .then((res) => {
         if (res.success) setNotesRemaining(res.remaining);
       });
-
   const fetchHours = (userId) =>
     fetch(`http://localhost:3001/api/tutor/hours/${userId}`)
       .then((r) => r.json())
@@ -325,40 +327,47 @@ function TutorDashboard() {
           setApprovedHours(res.approvedHours || 0);
         }
       });
-
   const fetchCertStatus = (userId) =>
     fetch(`http://localhost:3001/api/tutor/certificate-status/${userId}`)
       .then((r) => r.json())
       .then((res) => {
         if (res.success && res.data) setCertStatus(res.data.status);
       });
-
   const fetchUnreadMsg = (userId) =>
     fetch(`http://localhost:3001/api/messages/unread/${userId}`)
       .then((r) => r.json())
       .then((res) => {
         if (res.success) setUnreadMsg(res.count);
       });
-
+  const fetchContacts = (userId) =>
+    fetch(`http://localhost:3001/api/messages/contacts/tutor/${userId}`)
+      .then((r) => r.json())
+      .then((res) => {
+        if (res.success) setContacts(res.data);
+      });
   const fetchTutees = () =>
     fetch("http://localhost:3001/api/match/tutees")
       .then((r) => r.json())
       .then((res) => {
         if (res.success) setTuteesList(res.data);
       });
-
   const fetchMatchedTutee = (tuteeId) =>
     fetch(`http://localhost:3001/api/match/tutee-info/${tuteeId}`)
       .then((r) => r.json())
       .then((res) => {
         if (res.success) setMatchedTutee(res.data);
       });
-
   const fetchClasses = (userId) =>
     fetch(`http://localhost:3001/api/classes/${userId}`)
       .then((r) => r.json())
       .then((res) => {
         if (res.success) setClasses(res.data);
+      });
+  const fetchUnmatchStatus = (userId) =>
+    fetch(`http://localhost:3001/api/unmatch/status/${userId}`)
+      .then((r) => r.json())
+      .then((res) => {
+        if (res.success) setUnmatchStatus(res.data);
       });
 
   // ─── 初始化 ───
@@ -383,8 +392,8 @@ function TutorDashboard() {
               fetchHours(result.data.user_id);
               fetchCertStatus(result.data.user_id);
               fetchUnreadMsg(result.data.user_id);
-
-              // WebSocket
+              fetchContacts(result.data.user_id);
+              fetchUnmatchStatus(result.data.user_id);
               const ws = new WebSocket("ws://localhost:3001");
               wsRef.current = ws;
               ws.onopen = () =>
@@ -394,7 +403,10 @@ function TutorDashboard() {
                     userId: result.data.user_id,
                   }),
                 );
-              ws.onmessage = () => fetchUnreadMsg(result.data.user_id);
+              ws.onmessage = () => {
+                fetchUnreadMsg(result.data.user_id);
+                fetchContacts(result.data.user_id);
+              };
             }
           }
         });
@@ -409,6 +421,16 @@ function TutorDashboard() {
     sessionStorage.setItem("tutorActiveTab", activeTab);
   }, [activeTab]);
 
+  // 點外部關閉訊息下拉
+  useEffect(() => {
+    if (!msgDropdownOpen) return;
+    const handleClick = (e) => {
+      if (!e.target.closest("[data-msg-dropdown]")) setMsgDropdownOpen(false);
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [msgDropdownOpen]);
+
   const avatarInitial = userInfo.englishName
     ? userInfo.englishName.charAt(0).toUpperCase()
     : "T";
@@ -420,7 +442,7 @@ function TutorDashboard() {
     navigate("/");
   };
 
-  // ─── 緊急通報 ───
+  // ─── 各種操作 ───
   const handleEmergencyAlert = async (cls) => {
     if (
       !window.confirm(
@@ -445,7 +467,6 @@ function TutorDashboard() {
     }
   };
 
-  // ─── 配對邀請 ───
   const handleSendRequest = async (tuteeUserId, tuteeName) => {
     if (!window.confirm(`確定要向 ${tuteeName} 發送輔導邀請嗎？`)) return;
     try {
@@ -462,7 +483,6 @@ function TutorDashboard() {
     }
   };
 
-  // ─── 課程操作 ───
   const handleCheckin = async (classId) => {
     try {
       const res = await fetch(
@@ -475,7 +495,10 @@ function TutorDashboard() {
       );
       const data = await res.json();
       alert(data.message);
-      if (data.success) fetchClasses(userInfo.user_id);
+      if (data.success) {
+        fetchClasses(userInfo.user_id);
+        fetchHours(userInfo.user_id);
+      }
     } catch {
       alert("連線錯誤");
     }
@@ -501,6 +524,7 @@ function TutorDashboard() {
         setMakeupReason("");
         setMakeupFile(null);
         fetchMakeupRemaining(userInfo.user_id);
+        fetchHours(userInfo.user_id);
       }
     } catch {
       alert("連線錯誤");
@@ -508,20 +532,24 @@ function TutorDashboard() {
   };
 
   const handleOpenNotesModal = async (cls) => {
-    const dateStr = cls.class_date.split("T")[0];
+    const dateStr =
+      typeof cls.class_date === "string"
+        ? cls.class_date.split("T")[0]
+        : cls.class_date;
     const deadline = new Date(`${dateStr}T23:59:59`);
     const isDeadlinePassed = new Date() > deadline;
+    const classId = cls.id || cls.class_id;
     setNotesModal({
       isOpen: true,
-      classId: cls.id,
+      classId,
       classDate: dateStr,
-      startTime: cls.start_time.substring(0, 5),
-      endTime: cls.end_time.substring(0, 5),
+      startTime: (cls.start_time || "").substring(0, 5),
+      endTime: (cls.end_time || "").substring(0, 5),
       isDeadlinePassed,
     });
     try {
       const res = await fetch(
-        `http://localhost:3001/api/classes/${cls.id}/notes/${userInfo.user_id}`,
+        `http://localhost:3001/api/classes/${classId}/notes/${userInfo.user_id}`,
       );
       const data = await res.json();
       if (data.success && data.data) {
@@ -569,6 +597,7 @@ function TutorDashboard() {
         });
         if (notesModal.isDeadlinePassed) fetchNotesRemaining(userInfo.user_id);
         fetchClasses(userInfo.user_id);
+        fetchHours(userInfo.user_id);
       }
     } catch {
       alert("連線錯誤");
@@ -613,6 +642,31 @@ function TutorDashboard() {
     }
   };
 
+  const handleUnmatchSubmit = async (e) => {
+    e.preventDefault();
+    if (!unmatchReason.trim()) return alert("請填寫解除原因");
+    try {
+      const res = await fetch("http://localhost:3001/api/unmatch/request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: userInfo.user_id,
+          role: "tutor",
+          reason: unmatchReason,
+        }),
+      });
+      const data = await res.json();
+      alert(data.message);
+      if (data.success) {
+        setUnmatchModal(false);
+        setUnmatchReason("");
+        fetchUnmatchStatus(userInfo.user_id);
+      }
+    } catch {
+      alert("連線錯誤");
+    }
+  };
+
   const handleAddSlot = () =>
     setSlots([...slots, { date: "", startTime: "14:00", endTime: "15:00" }]);
   const handleRemoveSlot = (i) => setSlots(slots.filter((_, idx) => idx !== i));
@@ -621,7 +675,6 @@ function TutorDashboard() {
     s[i][field] = value;
     setSlots(s);
   };
-
   const getWeekdayString = (dateString) => {
     if (!dateString) return "";
     const [y, m, d] = dateString.split("-");
@@ -729,13 +782,12 @@ function TutorDashboard() {
   };
 
   // ═══════════════════════════════════════════════════════
-  // 渲染：課程卡片
+  // 課程卡片（首頁用，只顯示未來課程）
   // ═══════════════════════════════════════════════════════
   const renderClassCard = (cls, type = "normal") => {
     const dateStr = cls.class_date.split("T")[0];
     const [year, month, day] = dateStr.split("-").map(Number);
     const displayDate = new Date(year, month - 1, day);
-    const isPast = type === "past";
     const isUpcoming = type === "upcoming";
     const now = new Date();
     const deadline = new Date(`${dateStr}T23:59:59`);
@@ -748,13 +800,11 @@ function TutorDashboard() {
     return (
       <div
         key={cls.id}
-        className={`p-5 rounded-xl border flex flex-col gap-4 transition ${isPast ? "bg-slate-50 border-slate-200 opacity-80" : "bg-white border-slate-100 shadow-sm hover:border-primary/30 hover:shadow-md"}`}
+        className="p-5 rounded-xl border flex flex-col gap-4 transition bg-white border-slate-100 shadow-sm hover:border-primary/30 hover:shadow-md"
       >
         <div className="flex justify-between items-center">
           <div className="flex items-center">
-            <div
-              className={`w-12 h-12 rounded-xl flex flex-col items-center justify-center mr-4 flex-shrink-0 ${isPast ? "bg-slate-200 text-slate-500" : "bg-blue-50 border border-blue-100 text-blue-600"}`}
-            >
+            <div className="w-12 h-12 rounded-xl flex flex-col items-center justify-center mr-4 flex-shrink-0 bg-blue-50 border border-blue-100 text-blue-600">
               <span className="text-[10px] font-bold uppercase">
                 {displayDate.toLocaleDateString("en-US", { month: "short" })}
               </span>
@@ -763,9 +813,7 @@ function TutorDashboard() {
               </span>
             </div>
             <div>
-              <p
-                className={`font-bold ${isPast ? "text-slate-600" : "text-slate-800"} text-lg`}
-              >
+              <p className="font-bold text-slate-800 text-lg">
                 {matchedTutee
                   ? matchedTutee.chinese_name || matchedTutee.english_name
                   : "學生未載入"}
@@ -803,36 +851,22 @@ function TutorDashboard() {
               })()}
           </div>
         </div>
-
         <div className="grid grid-cols-4 gap-2 pt-3 border-t border-slate-100">
-          {/* 編輯時間 */}
-          {!isPast ? (
-            <button
-              onClick={() =>
-                setEditClassModal({
-                  isOpen: true,
-                  classId: cls.id,
-                  date: dateStr,
-                  startTime: cls.start_time.substring(0, 5),
-                  endTime: cls.end_time.substring(0, 5),
-                })
-              }
-              className="flex flex-col items-center justify-center py-2 rounded-lg text-slate-500 hover:bg-blue-50 hover:text-blue-600 transition"
-            >
-              <Edit size={16} className="mb-1" />
-              <span className="text-xs font-bold">編輯時間</span>
-            </button>
-          ) : (
-            <button
-              disabled
-              className="flex flex-col items-center justify-center py-2 rounded-lg text-slate-300 cursor-not-allowed"
-            >
-              <Edit size={16} className="mb-1" />
-              <span className="text-xs font-bold">不可編輯</span>
-            </button>
-          )}
-
-          {/* 簽到 */}
+          <button
+            onClick={() =>
+              setEditClassModal({
+                isOpen: true,
+                classId: cls.id,
+                date: dateStr,
+                startTime: cls.start_time.substring(0, 5),
+                endTime: cls.end_time.substring(0, 5),
+              })
+            }
+            className="flex flex-col items-center justify-center py-2 rounded-lg text-slate-500 hover:bg-blue-50 hover:text-blue-600 transition"
+          >
+            <Edit size={16} className="mb-1" />
+            <span className="text-xs font-bold">編輯時間</span>
+          </button>
           {isSigned ? (
             <button
               disabled
@@ -859,11 +893,8 @@ function TutorDashboard() {
               <span className="text-xs font-bold">老師簽到</span>
             </button>
           )}
-
-          {/* 課堂紀錄 */}
           {(() => {
             const canFillNote = now >= classStart;
-            const isNoteDeadlinePassed = now > deadline;
             if (cls.has_note)
               return (
                 <button
@@ -874,7 +905,7 @@ function TutorDashboard() {
                   <span className="text-xs font-bold">已填寫 ✓</span>
                 </button>
               );
-            if (isNoteDeadlinePassed)
+            if (isDeadlinePassed)
               return (
                 <button
                   onClick={() => handleOpenNotesModal(cls)}
@@ -897,7 +928,6 @@ function TutorDashboard() {
             return (
               <button
                 disabled
-                title="上課開始後才能填寫"
                 className="flex flex-col items-center justify-center py-2 rounded-lg text-slate-300 cursor-not-allowed"
               >
                 <FileText size={16} className="mb-1" />
@@ -905,14 +935,12 @@ function TutorDashboard() {
               </button>
             );
           })()}
-
-          {/* 異常回報 */}
           <button
             onClick={() =>
               setReportModal({
                 isOpen: true,
                 classId: cls.id,
-                classDate: cls.class_date.split("T")[0],
+                classDate: dateStr,
                 startTime: cls.start_time.substring(0, 5),
                 endTime: cls.end_time.substring(0, 5),
               })
@@ -928,22 +956,17 @@ function TutorDashboard() {
   };
 
   // ═══════════════════════════════════════════════════════
-  // 渲染：各頁面
+  // 渲染：首頁（只顯示未來課程）
   // ═══════════════════════════════════════════════════════
   const renderHome = () => {
     const now = new Date();
-    const pastClasses = [],
-      upcomingAndFuture = [];
-    classes.forEach((cls) => {
-      const dateStr = cls.class_date.split("T")[0];
-      new Date(`${dateStr}T${cls.end_time}`) < now
-        ? pastClasses.push(cls)
-        : upcomingAndFuture.push(cls);
-    });
-    pastClasses.sort((a, b) => new Date(b.class_date) - new Date(a.class_date));
-    upcomingAndFuture.sort(
-      (a, b) => new Date(a.class_date) - new Date(b.class_date),
-    );
+    const upcomingAndFuture = classes
+      .filter((cls) => {
+        const dateStr = cls.class_date.split("T")[0];
+        return new Date(`${dateStr}T${cls.end_time}`) >= now;
+      })
+      .sort((a, b) => new Date(a.class_date) - new Date(b.class_date));
+
     const upcomingClass = upcomingAndFuture[0] || null;
     const futureClasses = upcomingAndFuture.slice(1);
 
@@ -978,24 +1001,27 @@ function TutorDashboard() {
               </div>
             </div>
           )}
-          {pastClasses.length > 0 && (
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-              <div className="bg-white px-6 py-3 border-b border-slate-100">
-                <h2 className="text-sm font-bold text-slate-600 tracking-wider">
-                  過去上課 Past Classes
-                </h2>
-              </div>
-              <div className="p-6 flex flex-col gap-4">
-                {pastClasses.map((cls) => renderClassCard(cls, "past"))}
-              </div>
-            </div>
-          )}
+          {/* 過去課程提示 */}
+          <div className="bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 text-sm text-slate-500 flex items-center gap-3">
+            <Award size={18} className="text-slate-400 flex-shrink-0" />
+            過去的上課紀錄與時數，請前往「
+            <button
+              onClick={() => setActiveTab("hours")}
+              className="text-primary font-bold hover:underline"
+            >
+              輔導時數
+            </button>
+            」查看。
+          </div>
         </main>
         <aside className="hidden xl:flex w-72 flex-col gap-6 flex-shrink-0" />
       </>
     );
   };
 
+  // ═══════════════════════════════════════════════════════
+  // 渲染：審查結果
+  // ═══════════════════════════════════════════════════════
   const renderReviews = () => (
     <main className="flex-grow w-full bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden animate-fade-in">
       <div className="bg-slate-50 px-8 py-5 border-b border-slate-100">
@@ -1049,6 +1075,9 @@ function TutorDashboard() {
     </main>
   );
 
+  // ═══════════════════════════════════════════════════════
+  // 渲染：尋找學生
+  // ═══════════════════════════════════════════════════════
   const renderFindStudents = () => {
     const filteredTutees = tuteesList.filter((tutee) => {
       const skills =
@@ -1059,11 +1088,6 @@ function TutorDashboard() {
         typeof tutee.available_times === "string"
           ? JSON.parse(tutee.available_times)
           : tutee.available_times || { days: [], slots: [] };
-      if (
-        filterNationality !== "All" &&
-        tutee.nationality !== filterNationality
-      )
-        return false;
       if (filterGender !== "All" && tutee.gender !== filterGender) return false;
       if (filterLevel !== "All" && tutee.overall_level !== filterLevel)
         return false;
@@ -1081,13 +1105,12 @@ function TutorDashboard() {
         return false;
       return true;
     });
-
     return (
       <main className="flex-grow flex flex-col gap-6 animate-fade-in">
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden flex flex-col min-h-[600px]">
           <div className="bg-slate-50 px-8 py-5 border-b border-slate-100 flex justify-between items-center">
             <h2 className="font-bold text-lg text-slate-800 flex items-center">
-              <Search size={22} className="mr-2 text-primary" /> 尋找外籍生
+              <Search size={22} className="mr-2 text-primary" /> 尋找外籍生{" "}
               <span className="ml-3 text-sm font-normal text-slate-400">
                 共 {filteredTutees.length} 人
               </span>
@@ -1104,7 +1127,6 @@ function TutorDashboard() {
               )}
             </button>
           </div>
-
           {filterOpen && (
             <div className="border-b border-slate-100 bg-slate-50/60 px-8 py-6">
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
@@ -1157,7 +1179,7 @@ function TutorDashboard() {
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-500 mb-2">
-                    ✏️ 想加強的技能（可複選）
+                    ✏️ 想加強的技能
                   </label>
                   <div className="flex gap-2 flex-wrap">
                     {Object.entries(SKILL_MAP).map(([k, label]) => (
@@ -1175,7 +1197,7 @@ function TutorDashboard() {
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-500 mb-2">
-                    📅 有時間交集的星期（可複選）
+                    📅 星期（可複選）
                   </label>
                   <div className="flex gap-2">
                     {FILTER_DAYS.map((d) => (
@@ -1193,7 +1215,7 @@ function TutorDashboard() {
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-500 mb-2">
-                    ⏰ 有時間交集的時段（可複選）
+                    ⏰ 時段（可複選）
                   </label>
                   <div className="flex flex-wrap gap-2">
                     {FILTER_SLOTS.map((s) => (
@@ -1222,7 +1244,6 @@ function TutorDashboard() {
               )}
             </div>
           )}
-
           <div className="p-6 grid grid-cols-1 xl:grid-cols-2 gap-6 bg-slate-50/30 flex-grow content-start">
             {filteredTutees.length > 0 ? (
               filteredTutees.map((tutee) => {
@@ -1375,6 +1396,9 @@ function TutorDashboard() {
     );
   };
 
+  // ═══════════════════════════════════════════════════════
+  // 渲染：我的學生
+  // ═══════════════════════════════════════════════════════
   const renderMyStudent = () => {
     if (userInfo.matched_tutee_id && matchedTutee) {
       const skills =
@@ -1438,13 +1462,42 @@ function TutorDashboard() {
                 <p className="font-medium text-primary hover:underline cursor-pointer mb-4">
                   {matchedTutee.email || "未提供 Email"}
                 </p>
-                {/* ── 私訊按鈕 ── */}
                 <button
-                  onClick={() => setChatOpen(true)}
+                  onClick={() => {
+                    setActiveChat(matchedTutee);
+                    setChatOpen(true);
+                  }}
                   className="flex items-center gap-2 px-5 py-2.5 bg-primary text-white font-bold rounded-xl shadow-sm hover:bg-primary-dark transition"
                 >
                   <MessageSquare size={18} /> 傳送私訊
                 </button>
+                {/* 解除配對 */}
+                <div className="mt-6 pt-6 border-t border-slate-200">
+                  {unmatchStatus?.status === "pending" ? (
+                    <div className="flex items-center gap-2 px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-700 text-sm font-bold">
+                      <Clock size={16} /> 解除配對申請審核中，請靜候通知
+                    </div>
+                  ) : unmatchStatus?.status === "rejected" ? (
+                    <div className="flex flex-col gap-2">
+                      <div className="flex items-center gap-2 px-4 py-3 bg-red-50 border border-red-200 rounded-xl text-red-600 text-sm font-bold">
+                        <AlertCircle size={16} /> 解除申請已被駁回
+                      </div>
+                      <button
+                        onClick={() => setUnmatchModal(true)}
+                        className="flex items-center gap-2 px-4 py-2.5 border border-red-300 text-red-600 font-bold rounded-xl hover:bg-red-50 transition text-sm"
+                      >
+                        重新申請解除配對
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setUnmatchModal(true)}
+                      className="flex items-center gap-2 px-4 py-2.5 border border-slate-300 text-slate-500 font-bold rounded-xl hover:bg-red-50 hover:border-red-300 hover:text-red-600 transition text-sm"
+                    >
+                      申請解除配對
+                    </button>
+                  )}
+                </div>
               </div>
               <div className="bg-slate-50 p-6 rounded-xl border border-slate-100">
                 <div className="flex gap-6 mb-5 border-b border-slate-200 pb-5">
@@ -1564,6 +1617,9 @@ function TutorDashboard() {
     );
   };
 
+  // ═══════════════════════════════════════════════════════
+  // 渲染：課表
+  // ═══════════════════════════════════════════════════════
   const renderSchedule = () => (
     <main className="flex-grow w-full bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden animate-fade-in flex flex-col">
       <div className="bg-slate-50 px-8 py-5 border-b border-slate-100 flex justify-between items-center">
@@ -1611,62 +1667,57 @@ function TutorDashboard() {
           <h3 className="text-sm font-bold text-slate-500 mb-4">
             已排定課程 Scheduled Classes
           </h3>
-          {classes.length === 0 ? (
+          {classes.filter(
+            (cls) =>
+              new Date(`${cls.class_date.split("T")[0]}T${cls.end_time}`) >=
+              new Date(),
+          ).length === 0 ? (
             <div className="flex flex-col items-center justify-center text-slate-400 py-10 bg-slate-50 rounded-xl border border-dashed border-slate-200">
               <Calendar size={48} className="mb-3 text-slate-300" />
-              <p className="font-bold text-slate-600">目前沒有任何課程</p>
+              <p className="font-bold text-slate-600">目前沒有未來課程</p>
               <p className="text-sm mt-1">
                 請點擊上方「安排上課」按鈕為學生排課
               </p>
             </div>
           ) : (
             <div className="space-y-4">
-              {classes.map((cls, index) => {
-                const dateStr = cls.class_date.split("T")[0];
-                const [y, m, d] = dateStr.split("-").map(Number);
-                const displayDate = new Date(y, m - 1, d);
-                const isPast =
-                  new Date(`${dateStr}T${cls.end_time}`) < new Date();
-                return (
-                  <div
-                    key={cls.id}
-                    className={`flex items-center p-4 border rounded-xl shadow-sm transition ${isPast ? "bg-slate-50 border-slate-200 opacity-75" : "bg-white border-slate-100 hover:bg-slate-50"}`}
-                  >
+              {classes
+                .filter(
+                  (cls) =>
+                    new Date(
+                      `${cls.class_date.split("T")[0]}T${cls.end_time}`,
+                    ) >= new Date(),
+                )
+                .sort((a, b) => new Date(a.class_date) - new Date(b.class_date))
+                .map((cls, index) => {
+                  const dateStr = cls.class_date.split("T")[0];
+                  const [y, m, d] = dateStr.split("-").map(Number);
+                  const displayDate = new Date(y, m - 1, d);
+                  return (
                     <div
-                      className={`w-16 h-16 rounded-xl flex flex-col items-center justify-center mr-6 flex-shrink-0 ${isPast ? "bg-slate-200 text-slate-500" : "bg-blue-50 border border-blue-100 text-blue-600"}`}
+                      key={cls.id}
+                      className="flex items-center p-4 border rounded-xl shadow-sm bg-white border-slate-100 hover:bg-slate-50 transition"
                     >
-                      <span className="text-xs font-bold uppercase">
-                        {displayDate.toLocaleDateString("en-US", {
-                          month: "short",
-                        })}
-                      </span>
-                      <span className="text-xl font-black">
-                        {displayDate.getDate()}
-                      </span>
-                    </div>
-                    <div className="flex-grow">
-                      <h4 className="font-bold text-slate-800 text-lg">
-                        華語輔導課程 - 第 {index + 1} 堂
-                      </h4>
-                      <p className="text-slate-500 font-medium flex items-center mt-1">
-                        <Clock size={14} className="mr-1.5 text-slate-400" />{" "}
-                        {cls.start_time.substring(0, 5)} ~{" "}
-                        {cls.end_time.substring(0, 5)}
-                      </p>
-                    </div>
-                    {isPast ? (
-                      <div className="flex items-center gap-2 flex-shrink-0">
-                        <button
-                          disabled
-                          className="p-2 text-slate-300 cursor-not-allowed rounded-lg"
-                        >
-                          <Edit size={18} />
-                        </button>
-                        <div className="px-4 py-1.5 bg-slate-100 text-slate-400 font-bold text-sm rounded-lg border border-slate-200">
-                          已結束
-                        </div>
+                      <div className="w-16 h-16 rounded-xl flex flex-col items-center justify-center mr-6 flex-shrink-0 bg-blue-50 border border-blue-100 text-blue-600">
+                        <span className="text-xs font-bold uppercase">
+                          {displayDate.toLocaleDateString("en-US", {
+                            month: "short",
+                          })}
+                        </span>
+                        <span className="text-xl font-black">
+                          {displayDate.getDate()}
+                        </span>
                       </div>
-                    ) : (
+                      <div className="flex-grow">
+                        <h4 className="font-bold text-slate-800 text-lg">
+                          華語輔導課程 - 第 {index + 1} 堂
+                        </h4>
+                        <p className="text-slate-500 font-medium flex items-center mt-1">
+                          <Clock size={14} className="mr-1.5 text-slate-400" />{" "}
+                          {cls.start_time.substring(0, 5)} ~{" "}
+                          {cls.end_time.substring(0, 5)}
+                        </p>
+                      </div>
                       <div className="flex items-center gap-2 flex-shrink-0">
                         <button
                           onClick={() =>
@@ -1686,16 +1737,14 @@ function TutorDashboard() {
                           即將到來
                         </div>
                       </div>
-                    )}
-                  </div>
-                );
-              })}
+                    </div>
+                  );
+                })}
             </div>
           )}
         </div>
       </div>
 
-      {/* 排課 Modal */}
       {isScheduleModalOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-fade-in">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
@@ -1724,86 +1773,78 @@ function TutorDashboard() {
                     一週最多 2 小時
                   </span>
                 </div>
-                {slots.map((slot, index) => {
-                  const weekdayStr = getWeekdayString(slot.date);
-                  return (
-                    <div
-                      key={index}
-                      className="bg-slate-50 p-4 rounded-xl border border-slate-200 relative"
-                    >
-                      {slots.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveSlot(index)}
-                          className="absolute top-2 right-2 text-slate-400 hover:text-red-500"
-                        >
-                          <X size={16} />
-                        </button>
-                      )}
-                      <div className="mb-3">
-                        <label className="flex items-center text-xs font-bold text-slate-500 mb-1">
-                          上課日期 Date
-                          {weekdayStr && (
-                            <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-700 rounded-md text-[10px] tracking-widest shadow-sm">
-                              星期{weekdayStr}
-                            </span>
-                          )}
+                {slots.map((slot, index) => (
+                  <div
+                    key={index}
+                    className="bg-slate-50 p-4 rounded-xl border border-slate-200 relative"
+                  >
+                    {slots.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveSlot(index)}
+                        className="absolute top-2 right-2 text-slate-400 hover:text-red-500"
+                      >
+                        <X size={16} />
+                      </button>
+                    )}
+                    <div className="mb-3">
+                      <label className="flex items-center text-xs font-bold text-slate-500 mb-1">
+                        上課日期 Date
+                        {getWeekdayString(slot.date) && (
+                          <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-700 rounded-md text-[10px] tracking-widest shadow-sm">
+                            星期{getWeekdayString(slot.date)}
+                          </span>
+                        )}
+                      </label>
+                      <input
+                        type="date"
+                        value={slot.date}
+                        onChange={(e) =>
+                          handleSlotChange(index, "date", e.target.value)
+                        }
+                        required
+                        className="w-full border border-slate-300 rounded-lg px-3 py-2 outline-none focus:border-primary text-sm"
+                      />
+                    </div>
+                    <div className="flex gap-3">
+                      <div className="flex-1">
+                        <label className="block text-xs font-bold text-slate-500 mb-1">
+                          開始 Start
                         </label>
                         <input
-                          type="date"
-                          value={slot.date}
+                          type="time"
+                          value={slot.startTime}
                           onChange={(e) =>
-                            handleSlotChange(index, "date", e.target.value)
+                            handleSlotChange(index, "startTime", e.target.value)
                           }
                           required
                           className="w-full border border-slate-300 rounded-lg px-3 py-2 outline-none focus:border-primary text-sm"
                         />
                       </div>
-                      <div className="flex gap-3">
-                        <div className="flex-1">
-                          <label className="block text-xs font-bold text-slate-500 mb-1">
-                            開始 Start
-                          </label>
-                          <input
-                            type="time"
-                            value={slot.startTime}
-                            onChange={(e) =>
-                              handleSlotChange(
-                                index,
-                                "startTime",
-                                e.target.value,
-                              )
-                            }
-                            required
-                            className="w-full border border-slate-300 rounded-lg px-3 py-2 outline-none focus:border-primary text-sm"
-                          />
-                        </div>
-                        <div className="flex-1">
-                          <label className="block text-xs font-bold text-slate-500 mb-1">
-                            結束 End
-                          </label>
-                          <input
-                            type="time"
-                            value={slot.endTime}
-                            onChange={(e) =>
-                              handleSlotChange(index, "endTime", e.target.value)
-                            }
-                            required
-                            className="w-full border border-slate-300 rounded-lg px-3 py-2 outline-none focus:border-primary text-sm"
-                          />
-                        </div>
+                      <div className="flex-1">
+                        <label className="block text-xs font-bold text-slate-500 mb-1">
+                          結束 End
+                        </label>
+                        <input
+                          type="time"
+                          value={slot.endTime}
+                          onChange={(e) =>
+                            handleSlotChange(index, "endTime", e.target.value)
+                          }
+                          required
+                          className="w-full border border-slate-300 rounded-lg px-3 py-2 outline-none focus:border-primary text-sm"
+                        />
                       </div>
                     </div>
-                  );
-                })}
+                  </div>
+                ))}
                 {slots.length < 2 && (
                   <button
                     type="button"
                     onClick={handleAddSlot}
                     className="flex items-center text-sm font-bold text-primary hover:text-primary-dark transition bg-primary/10 px-4 py-2 rounded-lg w-full justify-center border border-primary/20"
                   >
-                    <Plus size={16} className="mr-1" /> 新增一天 (Add another
-                    day)
+                    <Plus size={16} className="mr-1" /> 新增一天
                   </button>
                 )}
                 <div className="pt-5 border-t border-slate-100">
@@ -1821,8 +1862,7 @@ function TutorDashboard() {
                   {isRecurring && (
                     <div className="bg-blue-50/50 p-4 rounded-lg border border-blue-100">
                       <label className="block text-sm font-bold text-slate-700 mb-1">
-                        重複直到哪一天？ End Date{" "}
-                        <span className="text-red-500">*</span>
+                        重複直到哪一天？ <span className="text-red-500">*</span>
                       </label>
                       <input
                         type="date"
@@ -1857,6 +1897,9 @@ function TutorDashboard() {
     </main>
   );
 
+  // ═══════════════════════════════════════════════════════
+  // 渲染：輔導時數（可直接簽到/填紀錄、點擊展開詳情）
+  // ═══════════════════════════════════════════════════════
   const renderHours = () => {
     const TARGET_HOURS = 100;
     const pct = Math.min((approvedHours / TARGET_HOURS) * 100, 100);
@@ -1870,6 +1913,7 @@ function TutorDashboard() {
         displayDate: new Date(y, m - 1, d),
       };
     });
+
     const statusBadge = (row) => {
       if (row.hasSigned && row.hasNote)
         return (
@@ -1887,6 +1931,7 @@ function TutorDashboard() {
         </span>
       );
     };
+
     const certButton = () => {
       if (certStatus === "issued")
         return (
@@ -1915,8 +1960,10 @@ function TutorDashboard() {
         </button>
       );
     };
+
     return (
       <main className="flex-grow w-full flex flex-col gap-6 animate-fade-in">
+        {/* 時數進度卡 */}
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
           <div className="bg-gradient-to-r from-slate-700 to-slate-500 px-8 py-5">
             <h2 className="font-bold text-white text-lg flex items-center gap-2">
@@ -1955,6 +2002,8 @@ function TutorDashboard() {
             </div>
           </div>
         </div>
+
+        {/* 課堂時數明細 */}
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
           <div className="bg-slate-50 px-8 py-4 border-b border-slate-100 flex justify-between items-center">
             <h3 className="font-bold text-slate-700 flex items-center gap-2">
@@ -1964,6 +2013,7 @@ function TutorDashboard() {
               共 {rows.length} 堂課
             </span>
           </div>
+
           {rows.length === 0 ? (
             <div className="py-16 text-center text-slate-400 font-medium">
               <Calendar size={40} className="mx-auto mb-3 text-slate-200" />
@@ -1971,73 +2021,235 @@ function TutorDashboard() {
             </div>
           ) : (
             <div className="divide-y divide-slate-100">
-              <div className="hidden md:grid grid-cols-[2fr_1fr_1fr_1fr_1.5fr] px-6 py-3 bg-slate-50/80 text-xs font-bold text-slate-400 uppercase tracking-wider">
+              {/* 表頭 */}
+              <div className="hidden md:grid grid-cols-[2fr_1.2fr_1fr_1fr_1fr_1.5fr] px-6 py-3 bg-slate-50/80 text-xs font-bold text-slate-400 uppercase tracking-wider">
                 <span>日期 / 時間</span>
+                <span>學生</span>
                 <span>時長</span>
                 <span>老師簽到</span>
                 <span>課堂紀錄</span>
                 <span>審查狀態</span>
               </div>
-              {rows.map((row) => (
-                <div
-                  key={row.class_id}
-                  className="grid grid-cols-1 md:grid-cols-[2fr_1fr_1fr_1fr_1.5fr] px-6 py-4 items-center gap-3 hover:bg-slate-50 transition"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-11 h-11 bg-slate-100 text-slate-500 rounded-xl flex flex-col items-center justify-center flex-shrink-0">
-                      <span className="text-[9px] font-bold uppercase">
-                        {row.displayDate.toLocaleDateString("en-US", {
-                          month: "short",
-                        })}
-                      </span>
-                      <span className="text-sm font-black leading-none">
-                        {row.displayDate.getDate()}
-                      </span>
+
+              {rows.map((row) => {
+                const isExpanded = expandedRow === row.class_id;
+                const dateStr = row.class_date;
+                const now = new Date();
+                const deadline = new Date(`${dateStr}T23:59:59`);
+                const isDeadlinePassed = now > deadline;
+                const classStart = new Date(`${dateStr}T${row.start_time}`);
+                const windowStart = new Date(
+                  classStart.getTime() - 30 * 60 * 1000,
+                );
+                const canCheckin =
+                  now >= windowStart && !isDeadlinePassed && !row.hasSigned;
+                const canFillNote = now >= classStart && !row.hasNote;
+
+                return (
+                  <div key={row.class_id}>
+                    {/* 主列（點擊展開） */}
+                    <div
+                      onClick={() =>
+                        setExpandedRow(isExpanded ? null : row.class_id)
+                      }
+                      className={`grid grid-cols-1 md:grid-cols-[2fr_1.2fr_1fr_1fr_1fr_1.5fr] px-6 py-4 items-center gap-3 cursor-pointer transition ...`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div
+                          className={`w-11 h-11 rounded-xl flex flex-col items-center justify-center flex-shrink-0 ${row.hasSigned && row.hasNote ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-500"}`}
+                        >
+                          <span className="text-[9px] font-bold uppercase">
+                            {row.displayDate.toLocaleDateString("en-US", {
+                              month: "short",
+                            })}
+                          </span>
+                          <span className="text-sm font-black leading-none">
+                            {row.displayDate.getDate()}
+                          </span>
+                        </div>
+                        <div>
+                          <p className="font-bold text-slate-700 text-sm">
+                            {row.class_date}
+                          </p>
+                          <p className="text-xs text-slate-400">
+                            {row.start_time.substring(0, 5)} ~{" "}
+                            {row.end_time.substring(0, 5)}
+                          </p>
+                        </div>
+                        <ChevronRight
+                          size={14}
+                          className={`text-slate-300 transition-transform ${isExpanded ? "rotate-90" : ""}`}
+                        />
+                      </div>
+                      {/* 學生姓名 */}
+                      <div className="hidden md:block">
+                        <p className="text-sm font-bold text-slate-700 truncate">
+                          {row.tutee_chinese_name ||
+                            row.tutee_english_name ||
+                            "—"}
+                        </p>
+                        {row.tutee_chinese_name && row.tutee_english_name && (
+                          <p className="text-xs text-slate-400 truncate">
+                            {row.tutee_english_name}
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex items-baseline gap-1">
+                        <span
+                          className={`font-black text-xl ${row.hasSigned && row.hasNote ? "text-green-600" : "text-slate-700"}`}
+                        >
+                          {row.hrs.toFixed(1)}
+                        </span>
+                        <span className="text-xs text-slate-400 font-bold">
+                          hr
+                        </span>
+                      </div>
+                      <div>
+                        {row.hasSigned ? (
+                          <span className="flex items-center gap-1 text-green-600 text-xs font-bold">
+                            <CheckCircle size={14} /> 已簽到
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1 text-slate-400 text-xs font-bold">
+                            <AlertCircle size={14} /> 未簽到
+                          </span>
+                        )}
+                      </div>
+                      <div>
+                        {row.hasNote ? (
+                          <span className="flex items-center gap-1 text-green-600 text-xs font-bold">
+                            <CheckCircle size={14} /> 已填寫
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1 text-slate-400 text-xs font-bold">
+                            <AlertCircle size={14} /> 未填寫
+                          </span>
+                        )}
+                      </div>
+                      <div>{statusBadge(row)}</div>
                     </div>
-                    <div>
-                      <p className="font-bold text-slate-700 text-sm">
-                        {row.class_date}
-                      </p>
-                      <p className="text-xs text-slate-400">
-                        {row.start_time.substring(0, 5)} ~{" "}
-                        {row.end_time.substring(0, 5)}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-baseline gap-1">
-                    <span className="font-black text-xl text-slate-700">
-                      {row.hrs.toFixed(1)}
-                    </span>
-                    <span className="text-xs text-slate-400 font-bold">hr</span>
-                  </div>
-                  <div>
-                    {row.hasSigned ? (
-                      <span className="flex items-center gap-1 text-green-600 text-xs font-bold">
-                        <CheckCircle size={14} /> 已簽到
-                      </span>
-                    ) : (
-                      <span className="flex items-center gap-1 text-slate-400 text-xs font-bold">
-                        <AlertCircle size={14} /> 未簽到
-                      </span>
+
+                    {/* 展開的操作區 */}
+                    {isExpanded && (
+                      <div className="bg-blue-50/30 border-t border-blue-100 px-6 py-4">
+                        <div className="flex flex-wrap gap-3 items-center">
+                          <span className="text-xs font-bold text-slate-500">
+                            快速操作：
+                          </span>
+
+                          {/* 簽到按鈕 */}
+                          {row.hasSigned ? (
+                            <span className="px-3 py-1.5 bg-green-100 text-green-700 text-xs font-bold rounded-lg flex items-center gap-1">
+                              <CheckCircle size={13} /> 已完成簽到
+                            </span>
+                          ) : isDeadlinePassed ? (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setMakeupModal({
+                                  isOpen: true,
+                                  classId: row.class_id,
+                                });
+                              }}
+                              className="px-3 py-1.5 bg-red-100 text-red-600 text-xs font-bold rounded-lg hover:bg-red-200 transition flex items-center gap-1"
+                            >
+                              <CheckSquare size={13} /> 補簽到申請
+                            </button>
+                          ) : canCheckin ? (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleCheckin(row.class_id);
+                              }}
+                              className="px-3 py-1.5 bg-orange-100 text-orange-700 text-xs font-bold rounded-lg hover:bg-orange-200 transition flex items-center gap-1"
+                            >
+                              <CheckSquare size={13} /> 立即簽到
+                            </button>
+                          ) : (
+                            <span className="px-3 py-1.5 bg-slate-100 text-slate-400 text-xs font-bold rounded-lg">
+                              尚未到簽到時間
+                            </span>
+                          )}
+
+                          {/* 課堂紀錄按鈕 */}
+                          {row.hasNote ? (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleOpenNotesModal({
+                                  id: row.class_id,
+                                  class_date: row.class_date,
+                                  start_time: row.start_time,
+                                  end_time: row.end_time,
+                                });
+                              }}
+                              className="px-3 py-1.5 bg-green-100 text-green-700 text-xs font-bold rounded-lg hover:bg-green-200 transition flex items-center gap-1"
+                            >
+                              <FileText size={13} /> 查看 / 編輯紀錄
+                            </button>
+                          ) : isDeadlinePassed ? (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleOpenNotesModal({
+                                  id: row.class_id,
+                                  class_date: row.class_date,
+                                  start_time: row.start_time,
+                                  end_time: row.end_time,
+                                });
+                              }}
+                              className="px-3 py-1.5 bg-red-100 text-red-600 text-xs font-bold rounded-lg hover:bg-red-200 transition flex items-center gap-1"
+                            >
+                              <FileText size={13} /> 補填紀錄申請
+                            </button>
+                          ) : canFillNote ? (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleOpenNotesModal({
+                                  id: row.class_id,
+                                  class_date: row.class_date,
+                                  start_time: row.start_time,
+                                  end_time: row.end_time,
+                                });
+                              }}
+                              className="px-3 py-1.5 bg-blue-100 text-blue-700 text-xs font-bold rounded-lg hover:bg-blue-200 transition flex items-center gap-1"
+                            >
+                              <FileText size={13} /> 填寫課堂紀錄
+                            </button>
+                          ) : (
+                            <span className="px-3 py-1.5 bg-slate-100 text-slate-400 text-xs font-bold rounded-lg">
+                              上課開始後才能填寫
+                            </span>
+                          )}
+
+                          {/* 異常回報 */}
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setReportModal({
+                                isOpen: true,
+                                classId: row.class_id,
+                                classDate: row.class_date,
+                                startTime: row.start_time.substring(0, 5),
+                                endTime: row.end_time.substring(0, 5),
+                              });
+                            }}
+                            className="px-3 py-1.5 bg-slate-100 text-slate-500 text-xs font-bold rounded-lg hover:bg-red-100 hover:text-red-600 transition flex items-center gap-1"
+                          >
+                            <Flag size={13} /> 異常回報
+                          </button>
+                        </div>
+                      </div>
                     )}
                   </div>
-                  <div>
-                    {row.hasNote ? (
-                      <span className="flex items-center gap-1 text-green-600 text-xs font-bold">
-                        <CheckCircle size={14} /> 已填寫
-                      </span>
-                    ) : (
-                      <span className="flex items-center gap-1 text-slate-400 text-xs font-bold">
-                        <AlertCircle size={14} /> 未填寫
-                      </span>
-                    )}
-                  </div>
-                  <div>{statusBadge(row)}</div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
+
+        {/* 申請證書 */}
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-8 flex flex-col sm:flex-row items-center justify-between gap-6">
           <div>
             <h3 className="font-bold text-slate-800 text-lg flex items-center gap-2">
@@ -2071,7 +2283,6 @@ function TutorDashboard() {
   // ═══════════════════════════════════════════════════════
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
-      {/* Header */}
       <header className="bg-white shadow-sm h-16 flex items-center justify-between px-6 sticky top-0 z-20">
         <div className="flex items-center space-x-8">
           <img src={logoImg} alt="Logo" className="h-8 w-auto object-contain" />
@@ -2093,18 +2304,94 @@ function TutorDashboard() {
           </nav>
         </div>
         <div className="flex items-center space-x-5">
-          {/* 私訊按鈕（右上角） */}
-          <button
-            onClick={() => setChatOpen((prev) => !prev)}
-            className="relative text-slate-400 hover:text-primary transition"
-          >
-            <MessageSquare size={20} />
-            {unreadMsg > 0 && (
-              <span className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-500 text-white text-[10px] font-black rounded-full flex items-center justify-center animate-pulse">
-                {unreadMsg > 9 ? "9+" : unreadMsg}
-              </span>
+          {/* 私訊下拉 */}
+          <div className="relative" data-msg-dropdown>
+            <button
+              onClick={() => {
+                setMsgDropdownOpen((prev) => !prev);
+                if (userInfo.user_id) fetchContacts(userInfo.user_id);
+              }}
+              className="relative text-slate-400 hover:text-primary transition"
+            >
+              <MessageSquare size={20} />
+              {unreadMsg > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-500 text-white text-[10px] font-black rounded-full flex items-center justify-center animate-pulse">
+                  {unreadMsg > 9 ? "9+" : unreadMsg}
+                </span>
+              )}
+            </button>
+            {msgDropdownOpen && (
+              <div className="absolute right-0 mt-3 w-80 bg-white rounded-2xl shadow-xl border border-slate-100 overflow-hidden z-50">
+                <div className="px-4 py-3 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                  <span className="font-bold text-slate-700 text-sm flex items-center gap-2">
+                    <MessageSquare size={15} className="text-primary" /> 訊息
+                    Messages
+                  </span>
+                  <button
+                    onClick={() => setMsgDropdownOpen(false)}
+                    className="text-slate-400 hover:text-slate-600"
+                  >
+                    <X size={15} />
+                  </button>
+                </div>
+                <div className="max-h-80 overflow-y-auto divide-y divide-slate-50">
+                  {contacts.length > 0 ? (
+                    contacts.map((contact) => (
+                      <button
+                        key={contact.user_id}
+                        onClick={() => {
+                          setActiveChat(contact);
+                          setChatOpen(true);
+                          setMsgDropdownOpen(false);
+                        }}
+                        className="w-full flex items-center gap-3 px-4 py-3 hover:bg-slate-50 transition text-left"
+                      >
+                        <div className="w-10 h-10 bg-green-100 text-green-600 rounded-full flex items-center justify-center font-bold text-sm flex-shrink-0">
+                          {(contact.english_name || contact.chinese_name || "?")
+                            .charAt(0)
+                            .toUpperCase()}
+                        </div>
+                        <div className="flex-grow min-w-0">
+                          <div className="flex items-center gap-2">
+                            <p className="font-bold text-slate-800 text-sm truncate">
+                              {contact.chinese_name || contact.english_name}
+                            </p>
+                            {contact.is_active ? (
+                              <span className="text-[10px] bg-green-100 text-green-600 font-bold px-1.5 py-0.5 rounded-full flex-shrink-0">
+                                配對中
+                              </span>
+                            ) : (
+                              <span className="text-[10px] bg-slate-100 text-slate-400 font-bold px-1.5 py-0.5 rounded-full flex-shrink-0">
+                                已結束
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs text-slate-400 truncate mt-0.5">
+                            {contact.last_message || "尚無訊息"}
+                          </p>
+                        </div>
+                        {parseInt(contact.unread_count) > 0 && (
+                          <span className="w-5 h-5 bg-red-500 text-white text-[10px] font-black rounded-full flex items-center justify-center flex-shrink-0">
+                            {contact.unread_count > 9
+                              ? "9+"
+                              : contact.unread_count}
+                          </span>
+                        )}
+                      </button>
+                    ))
+                  ) : (
+                    <div className="px-4 py-8 text-center text-slate-400 text-sm">
+                      <MessageSquare
+                        size={28}
+                        className="mx-auto mb-2 text-slate-200"
+                      />
+                      尚無配對紀錄
+                    </div>
+                  )}
+                </div>
+              </div>
             )}
-          </button>
+          </div>
           <button className="text-slate-400 hover:text-primary transition">
             <Bell size={20} />
           </button>
@@ -2153,9 +2440,7 @@ function TutorDashboard() {
         </div>
       </header>
 
-      {/* 主內容 */}
       <div className="flex-grow flex flex-col md:flex-row max-w-7xl mx-auto w-full p-6 gap-8">
-        {/* Sidebar */}
         <aside className="w-full md:w-64 flex flex-col gap-6 flex-shrink-0">
           <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
             <h3 className="font-bold text-slate-800 mb-5 flex items-center text-lg">
@@ -2165,7 +2450,7 @@ function TutorDashboard() {
               {[
                 { tab: "home", icon: <Home size={20} />, label: "首頁主控台" },
                 {
-                  tab: "profile",
+                  tab: "profile-nav",
                   icon: <User size={20} />,
                   label: "個人資訊",
                   isNav: true,
@@ -2240,7 +2525,6 @@ function TutorDashboard() {
           </div>
         </aside>
 
-        {/* 主區域 */}
         {activeTab === "home"
           ? renderHome()
           : activeTab === "find-students"
@@ -2277,7 +2561,7 @@ function TutorDashboard() {
               <div className="space-y-4">
                 <div>
                   <label className="flex items-center text-sm font-bold text-slate-700 mb-1">
-                    上課日期 Date
+                    上課日期
                     {getWeekdayString(editClassModal.date) && (
                       <span className="ml-2 px-2 py-0.5 bg-blue-100 text-blue-700 rounded-md text-[10px] tracking-widest shadow-sm">
                         星期{getWeekdayString(editClassModal.date)}
@@ -2300,7 +2584,7 @@ function TutorDashboard() {
                 <div className="flex gap-4">
                   <div className="flex-1">
                     <label className="block text-sm font-bold text-slate-700 mb-1">
-                      開始 Start
+                      開始
                     </label>
                     <input
                       type="time"
@@ -2317,7 +2601,7 @@ function TutorDashboard() {
                   </div>
                   <div className="flex-1">
                     <label className="block text-sm font-bold text-slate-700 mb-1">
-                      結束 End
+                      結束
                     </label>
                     <input
                       type="time"
@@ -2617,7 +2901,7 @@ function TutorDashboard() {
             >
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-1">
-                  上課時間 Time
+                  上課時間
                 </label>
                 <div className="w-full border border-slate-200 rounded-lg px-3 py-2 bg-slate-50 text-slate-500 text-sm">
                   {reportModal.classDate}　{reportModal.startTime} ~{" "}
@@ -2626,7 +2910,7 @@ function TutorDashboard() {
               </div>
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-1">
-                  回報類型 Type <span className="text-red-500">*</span>
+                  回報類型 <span className="text-red-500">*</span>
                 </label>
                 <select
                   value={reportForm.reportType}
@@ -2637,21 +2921,17 @@ function TutorDashboard() {
                   className="w-full border border-slate-300 rounded-lg px-3 py-2 outline-none focus:border-primary text-sm bg-white"
                 >
                   <option value="">請選擇類型...</option>
-                  <option value="student_absent">
-                    學生未出席 Student Absent
-                  </option>
-                  <option value="tutor_absent">老師未出席 Tutor Absent</option>
-                  <option value="venue_issue">場地問題 Venue Issue</option>
-                  <option value="learning_issue">
-                    學習進度問題 Learning Issue
-                  </option>
-                  <option value="safety">人身安全 Safety Concern</option>
-                  <option value="other">其他 Other</option>
+                  <option value="student_absent">學生未出席</option>
+                  <option value="tutor_absent">老師未出席</option>
+                  <option value="venue_issue">場地問題</option>
+                  <option value="learning_issue">學習進度問題</option>
+                  <option value="safety">人身安全</option>
+                  <option value="other">其他</option>
                 </select>
               </div>
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-1">
-                  地點 Location
+                  地點
                 </label>
                 <input
                   type="text"
@@ -2665,7 +2945,7 @@ function TutorDashboard() {
               </div>
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-1">
-                  回報內容 Content <span className="text-red-500">*</span>
+                  回報內容 <span className="text-red-500">*</span>
                 </label>
                 <textarea
                   value={reportForm.content}
@@ -2680,7 +2960,7 @@ function TutorDashboard() {
               </div>
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-1">
-                  附件 Attachment{" "}
+                  附件{" "}
                   <span className="text-slate-400 font-normal">（選填）</span>
                 </label>
                 <input
@@ -2705,13 +2985,13 @@ function TutorDashboard() {
                   }
                   className="flex-1 py-2.5 bg-slate-100 text-slate-600 font-bold rounded-xl hover:bg-slate-200 transition"
                 >
-                  取消 Cancel
+                  取消
                 </button>
                 <button
                   type="submit"
                   className="flex-1 py-2.5 bg-red-500 text-white font-bold rounded-xl hover:bg-red-600 transition shadow-sm"
                 >
-                  送出回報 Submit
+                  送出回報
                 </button>
               </div>
             </form>
@@ -2719,18 +2999,79 @@ function TutorDashboard() {
         </div>
       )}
 
-      {/* ── 聊天視窗 ── */}
-      {chatOpen && matchedTutee && (
+      {/* 解除配對 Modal */}
+      {unmatchModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
+            <div className="flex justify-between items-center px-6 py-4 border-b border-slate-100 bg-red-50">
+              <h3 className="font-bold text-lg text-red-700">申請解除配對</h3>
+              <button
+                onClick={() => {
+                  setUnmatchModal(false);
+                  setUnmatchReason("");
+                }}
+                className="text-slate-400 hover:text-red-500"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            <form onSubmit={handleUnmatchSubmit} className="p-6 space-y-4">
+              <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-700 leading-relaxed">
+                ⚠️ 解除配對後，<strong>未來</strong>
+                的課程將全部取消。過去已完成的輔導時數不受影響。
+              </div>
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-1">
+                  解除原因 <span className="text-red-500">*</span>
+                </label>
+                <textarea
+                  value={unmatchReason}
+                  onChange={(e) => setUnmatchReason(e.target.value)}
+                  placeholder="請說明申請解除配對的原因..."
+                  required
+                  rows={4}
+                  className="w-full border border-slate-300 rounded-lg px-3 py-2 outline-none focus:border-red-400 text-sm resize-none"
+                />
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setUnmatchModal(false);
+                    setUnmatchReason("");
+                  }}
+                  className="flex-1 py-2.5 bg-slate-100 text-slate-600 font-bold rounded-xl hover:bg-slate-200 transition"
+                >
+                  取消
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-2.5 bg-red-500 text-white font-bold rounded-xl hover:bg-red-600 transition shadow-sm"
+                >
+                  送出申請
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* 聊天視窗 */}
+      {chatOpen && activeChat && (
         <ChatWindow
           myUserId={userInfo.user_id}
           myAccount={userInfo.account}
-          partner={matchedTutee}
+          partner={activeChat}
           onClose={() => {
             setChatOpen(false);
             fetchUnreadMsg(userInfo.user_id);
+            fetchContacts(userInfo.user_id);
           }}
           wsRef={wsRef}
-          onRead={() => fetchUnreadMsg(userInfo.user_id)}
+          onRead={() => {
+            fetchUnreadMsg(userInfo.user_id);
+            fetchContacts(userInfo.user_id);
+          }}
         />
       )}
 

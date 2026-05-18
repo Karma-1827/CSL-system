@@ -26,6 +26,8 @@ import {
   BookOpen,
   ChevronRight,
   BadgeCheck,
+  UserCheck,
+  AlertCircle,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import logoImg from "./assets/csl-Logo.png";
@@ -85,6 +87,8 @@ function AdminDashboard() {
     englishName: "Admin",
     role: "admin",
   });
+
+  const [unmatchRequests, setUnmatchRequests] = useState([]);
 
   useEffect(() => {
     const account = localStorage.getItem("loggedInAccount");
@@ -190,6 +194,13 @@ function AdminDashboard() {
     }
   };
 
+  const fetchUnmatchRequests = () =>
+    fetch("http://localhost:3001/api/admin/unmatch-requests")
+      .then((r) => r.json())
+      .then((res) => {
+        if (res.success) setUnmatchRequests(res.data);
+      });
+
   useEffect(() => {
     fetchStudents();
     setSelectedStudent(null);
@@ -212,6 +223,7 @@ function AdminDashboard() {
       fetchMakeupCheckins();
       fetchClassNotes();
       fetchMakeupNotes();
+      fetchUnmatchRequests();
     }
   }, [activeTab]);
 
@@ -310,6 +322,29 @@ function AdminDashboard() {
         fetchPendingCounts();
         setDetailModal({ isOpen: false, data: null, type: "" });
       }
+    } catch {
+      alert("連線錯誤");
+    }
+  };
+
+  const handleUnmatchReview = async (id, action) => {
+    const msg =
+      action === "approved"
+        ? "確認核准解除配對？未來課程將全部取消。"
+        : "確認駁回此申請？";
+    if (!window.confirm(msg)) return;
+    try {
+      const res = await fetch(
+        `http://localhost:3001/api/admin/unmatch-requests/${id}/review`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action }),
+        },
+      );
+      const data = await res.json();
+      alert(data.message);
+      if (data.success) fetchUnmatchRequests();
     } catch {
       alert("連線錯誤");
     }
@@ -1341,6 +1376,93 @@ function AdminDashboard() {
     );
   };
 
+  const renderUnmatchRequests = () => (
+    <main className="flex-grow flex flex-col gap-4 animate-fade-in">
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+        <div className="bg-slate-50 px-6 py-4 border-b border-slate-100 flex justify-between items-center">
+          <h2 className="font-bold text-slate-700 flex items-center gap-2">
+            <UserCheck size={18} className="text-purple-600" /> 解除配對申請審查
+          </h2>
+          <button
+            onClick={fetchUnmatchRequests}
+            className="text-xs text-slate-500 hover:text-primary font-bold px-3 py-1.5 bg-white rounded-lg border border-slate-200 transition"
+          >
+            重新整理
+          </button>
+        </div>
+        <div className="p-0">
+          {unmatchRequests.length === 0 ? (
+            <div className="py-16 text-center text-slate-400 font-medium">
+              目前沒有解除配對申請
+            </div>
+          ) : (
+            <div className="divide-y divide-slate-100">
+              <div className="hidden md:grid grid-cols-[2fr_1.5fr_1.5fr_1fr_1fr_auto] px-6 py-3 bg-slate-50 text-xs font-bold text-slate-400 uppercase tracking-wider">
+                <span>申請者</span>
+                <span>小老師</span>
+                <span>外籍生</span>
+                <span>身份</span>
+                <span>狀態</span>
+                <span>操作</span>
+              </div>
+              {unmatchRequests.map((item) => (
+                <div
+                  key={item.id}
+                  className={`grid grid-cols-1 md:grid-cols-[2fr_1.5fr_1.5fr_1fr_1fr_auto] px-6 py-4 items-center gap-3 transition ${item.status === "pending" ? "bg-amber-50/30 hover:bg-amber-50" : "hover:bg-slate-50"}`}
+                >
+                  <div>
+                    <p className="font-bold text-slate-700 text-sm">
+                      {item.requester_chinese_name ||
+                        item.requester_english_name}
+                    </p>
+                    <p className="text-xs text-slate-400 mt-0.5 line-clamp-1">
+                      原因：{item.reason}
+                    </p>
+                    <p className="text-xs text-slate-400">
+                      {formatDateTime(item.created_at)}
+                    </p>
+                  </div>
+                  <div className="text-sm text-slate-600 font-medium">
+                    {item.tutor_chinese_name || item.tutor_english_name}
+                  </div>
+                  <div className="text-sm text-slate-600 font-medium">
+                    {item.tutee_chinese_name || item.tutee_english_name}
+                  </div>
+                  <div className="text-sm font-bold text-slate-600">
+                    {item.requester_role === "tutor" ? "小老師" : "外籍生"}
+                  </div>
+                  <div>{statusBadge(item.status)}</div>
+                  <div className="flex gap-2">
+                    {item.status === "pending" && (
+                      <>
+                        <button
+                          onClick={() =>
+                            handleUnmatchReview(item.id, "approved")
+                          }
+                          className="px-3 py-1.5 bg-green-500 text-white text-xs font-bold rounded-lg hover:bg-green-600 transition"
+                        >
+                          核准
+                        </button>
+                        <button
+                          onClick={() =>
+                            handleUnmatchReview(item.id, "rejected")
+                          }
+                          className="px-3 py-1.5 bg-red-100 text-red-600 text-xs font-bold rounded-lg hover:bg-red-200 transition"
+                        >
+                          駁回
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </main>
+  );
+
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
       <header className="bg-white shadow-sm h-16 flex items-center justify-between px-6 sticky top-0 z-20">
@@ -1487,6 +1609,25 @@ function AdminDashboard() {
               <li className="flex items-center p-3 rounded-xl cursor-pointer transition hover:bg-slate-50">
                 <FileCheck size={20} className="mr-4 text-slate-400" /> 審查資料
               </li>
+              <li
+                onClick={() => setActiveTab("unmatch")}
+                className={`flex items-center p-3 rounded-xl cursor-pointer transition ${activeTab === "unmatch" ? "bg-purple-50 text-purple-600 font-bold" : "hover:bg-slate-50"}`}
+              >
+                <UserCheck
+                  size={20}
+                  className={`mr-4 ${activeTab === "unmatch" ? "text-purple-600" : "text-slate-400"}`}
+                />
+                解除配對審查
+                {unmatchRequests.filter((r) => r.status === "pending").length >
+                  0 && (
+                  <span className="ml-auto text-[10px] bg-red-500 text-white font-bold px-1.5 py-0.5 rounded-full">
+                    {
+                      unmatchRequests.filter((r) => r.status === "pending")
+                        .length
+                    }
+                  </span>
+                )}
+              </li>
             </ul>
           </div>
         </aside>
@@ -1497,7 +1638,9 @@ function AdminDashboard() {
             ? renderEmergencyAlerts()
             : activeTab === "checkin-mgmt"
               ? renderCheckinMgmt()
-              : renderStudentDirectory()}
+              : activeTab === "unmatch"
+                ? renderUnmatchRequests()
+                : renderStudentDirectory()}
       </div>
 
       {/* 詳細內容 Modal（補簽到 / 補填 / 課堂紀錄） */}
