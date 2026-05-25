@@ -23,6 +23,7 @@ import {
   CheckSquare,
   Flag,
   ChevronRight,
+  BookOpen,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import logoImg from "./assets/csl-Logo.png";
@@ -305,6 +306,8 @@ function TutorDashboard() {
   const [contacts, setContacts] = useState([]);
   const wsRef = useRef(null);
 
+  const [notifDropdownOpen, setNotifDropdownOpen] = useState(false);
+
   // ─── fetch helpers ───
   const fetchMakeupRemaining = (userId) =>
     fetch(`http://localhost:3001/api/makeup-remaining/${userId}`)
@@ -381,6 +384,8 @@ function TutorDashboard() {
             setUserInfo({
               ...result.data,
               account,
+              chineseName: result.data.chinese_name || "",
+              englishName: result.data.english_name || "",
               matched_tutee_id: result.data.matched_tutee_id,
             });
             if (result.data.matched_tutee_id)
@@ -431,11 +436,21 @@ function TutorDashboard() {
     return () => document.removeEventListener("mousedown", handleClick);
   }, [msgDropdownOpen]);
 
+  useEffect(() => {
+    if (!notifDropdownOpen) return;
+    const handleClick = (e) => {
+      if (!e.target.closest("[data-notif-dropdown]"))
+        setNotifDropdownOpen(false);
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [notifDropdownOpen]);
+
   const avatarInitial = userInfo.englishName
     ? userInfo.englishName.charAt(0).toUpperCase()
     : "T";
-  const displayName = userInfo.chineseName
-    ? `${userInfo.chineseName} ${userInfo.englishName}`
+  const displayName = userInfo.chinese_name
+    ? `${userInfo.chinese_name} ${userInfo.english_name}`
     : userInfo.englishName || "Tutor Name";
   const handleLogout = () => {
     localStorage.removeItem("loggedInAccount");
@@ -2284,24 +2299,12 @@ function TutorDashboard() {
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
       <header className="bg-white shadow-sm h-16 flex items-center justify-between px-6 sticky top-0 z-20">
-        <div className="flex items-center space-x-8">
-          <img src={logoImg} alt="Logo" className="h-8 w-auto object-contain" />
-          <nav className="hidden md:flex space-x-1 bg-slate-100 p-1 rounded-lg">
-            {[
-              ["home", "首頁"],
-              ["find-students", "尋找學生"],
-              ["schedule", "課表"],
-              ["hours", "輔導時數"],
-            ].map(([tab, label]) => (
-              <button
-                key={tab}
-                onClick={() => setActiveTab(tab)}
-                className={`px-5 py-1.5 font-bold rounded-md shadow-sm text-sm transition ${activeTab === tab ? "bg-white text-primary" : "text-slate-500 hover:text-primary"}`}
-              >
-                {label}
-              </button>
-            ))}
-          </nav>
+        <div className="flex items-center pl-2">
+          <img
+            src={logoImg}
+            alt="Logo"
+            className="h-16 w-auto object-contain"
+          />
         </div>
         <div className="flex items-center space-x-5">
           {/* 私訊下拉 */}
@@ -2392,30 +2395,55 @@ function TutorDashboard() {
               </div>
             )}
           </div>
-          <button className="text-slate-400 hover:text-primary transition">
-            <Bell size={20} />
-          </button>
+          <div className="relative" data-notif-dropdown>
+            <button
+              onClick={() => setNotifDropdownOpen((prev) => !prev)}
+              className="relative text-slate-400 hover:text-primary transition"
+            >
+              <Bell size={20} />
+            </button>
+
+            {notifDropdownOpen && (
+              <div className="absolute right-0 mt-3 w-80 bg-white rounded-2xl shadow-xl border border-slate-100 overflow-hidden z-50">
+                <div className="px-4 py-3 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                  <span className="font-bold text-slate-700 text-sm flex items-center gap-2">
+                    <Bell size={15} className="text-primary" /> 通知
+                  </span>
+                  <button
+                    onClick={() => setNotifDropdownOpen(false)}
+                    className="text-slate-400 hover:text-slate-600"
+                  >
+                    <X size={15} />
+                  </button>
+                </div>
+                <div className="px-4 py-8 text-center text-slate-400 text-sm">
+                  <Bell size={28} className="mx-auto mb-2 text-slate-200" />
+                  通知功能即將上線
+                </div>
+              </div>
+            )}
+          </div>
           <div className="relative">
             <div
               className="flex items-center space-x-2 cursor-pointer hover:bg-slate-50 p-1 rounded-md transition"
               onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}
             >
-              <div className="w-9 h-9 bg-green-100 text-green-600 rounded-full flex items-center justify-center font-bold text-sm">
-                {avatarInitial}
+              <div className="w-9 h-9 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center">
+                <User size={18} />
               </div>
               <ChevronDown size={16} className="text-slate-400" />
             </div>
             {isProfileMenuOpen && (
               <div className="absolute right-0 mt-2 w-56 bg-white rounded-xl shadow-lg border border-slate-100 overflow-hidden z-50">
-                <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
-                  <span
-                    className="font-bold text-slate-800 truncate block w-36"
+                <div className="px-4 py-3 border-b border-slate-100">
+                  <p
+                    className="font-bold text-slate-800 truncate"
                     title={displayName}
                   >
                     {displayName}
-                  </span>
-                  <span className="text-[10px] bg-green-100 text-green-600 px-2 py-0.5 rounded-full font-bold capitalize">
-                    {userInfo.role}
+                  </p>
+                  <span className="text-[10px] bg-green-100 text-green-600 px-2 py-0.5 rounded-full font-bold capitalize mt-1 inline-block">
+                    老師
                   </span>
                 </div>
                 <div className="py-2">
@@ -2424,6 +2452,14 @@ function TutorDashboard() {
                     className="w-full flex items-center px-4 py-2 text-sm text-slate-600 hover:bg-slate-50 hover:text-primary transition"
                   >
                     <User size={16} className="mr-3" /> 個人資訊
+                  </button>
+                </div>
+                <div className="py-2">
+                  <button
+                    onClick={() => alert("使用手冊說明內容即將上線！")}
+                    className="w-full flex items-center px-4 py-2 text-sm text-slate-600 hover:bg-slate-50 hover:text-primary transition"
+                  >
+                    <BookOpen size={16} className="mr-3" /> 使用手冊說明
                   </button>
                 </div>
                 <div className="py-2 border-t border-slate-100">
@@ -2448,13 +2484,7 @@ function TutorDashboard() {
             </h3>
             <ul className="space-y-2 text-sm font-medium">
               {[
-                { tab: "home", icon: <Home size={20} />, label: "首頁主控台" },
-                {
-                  tab: "profile-nav",
-                  icon: <User size={20} />,
-                  label: "個人資訊",
-                  isNav: true,
-                },
+                { tab: "home", icon: <Home size={20} />, label: "首頁" },
                 {
                   tab: "my-student",
                   icon: <UserCheck size={20} />,
@@ -2481,6 +2511,16 @@ function TutorDashboard() {
                   {label}
                 </li>
               ))}
+              <li
+                onClick={() => setActiveTab("find-students")}
+                className={`flex items-center p-3 rounded-xl cursor-pointer transition group ${activeTab === "find-students" ? "bg-primary/10 text-primary font-bold" : "text-slate-600 hover:bg-slate-50 hover:text-primary"}`}
+              >
+                <Search
+                  size={20}
+                  className={`mr-4 ${activeTab === "find-students" ? "text-primary" : "text-slate-400 group-hover:text-primary"}`}
+                />
+                尋找學生
+              </li>
               <li
                 onClick={() => setActiveTab("hours")}
                 className={`flex items-center p-3 rounded-xl cursor-pointer transition group ${activeTab === "hours" ? "bg-primary/10 text-primary font-bold" : "text-slate-600 hover:bg-slate-50 hover:text-primary"}`}
@@ -2513,13 +2553,6 @@ function TutorDashboard() {
                 {userInfo.certification_status === "resubmit" && (
                   <span className="ml-auto w-2 h-2 bg-red-500 rounded-full shadow-sm" />
                 )}
-              </li>
-              <li className="flex items-center p-3 rounded-xl hover:bg-slate-50 hover:text-primary cursor-pointer transition group text-slate-600">
-                <Bell
-                  size={20}
-                  className="mr-4 text-slate-400 group-hover:text-primary"
-                />{" "}
-                通知
               </li>
             </ul>
           </div>

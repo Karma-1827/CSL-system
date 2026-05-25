@@ -28,6 +28,7 @@ import {
   BadgeCheck,
   UserCheck,
   AlertCircle,
+  Award,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import logoImg from "./assets/csl-Logo.png";
@@ -81,6 +82,9 @@ function AdminDashboard() {
     data: null,
     type: "", // 'makeup-checkin' | 'makeup-notes' | 'notes'
   });
+  const [certActiveTab, setCertActiveTab] = useState("cert");
+
+  const [notifDropdownOpen, setNotifDropdownOpen] = useState(false);
 
   const [userInfo, setUserInfo] = useState({
     chineseName: "管理員",
@@ -162,13 +166,15 @@ function AdminDashboard() {
     if (
       activeTab === "tutors" ||
       activeTab === "tutees" ||
-      activeTab === "home"
+      activeTab === "home" ||
+      activeTab === "review-data"
     ) {
       fetch(`http://localhost:3001/api/admin/users/tutor`)
         .then((res) => res.json())
         .then((result) => {
           if (result.success) {
-            if (activeTab === "tutors") setStudentsList(result.data);
+            if (activeTab === "tutors" || activeTab === "review-data")
+              setStudentsList(result.data); // ← 加上 review-data
             setPendingReviews(
               result.data.filter(
                 (s) =>
@@ -394,6 +400,251 @@ function AdminDashboard() {
         </span>
       );
     return null;
+  };
+
+  const renderReviewData = () => {
+    const certSubTab = certActiveTab; // 用 state 控制子分頁
+
+    return (
+      <main className="flex-grow flex flex-col gap-4 animate-fade-in">
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+          {/* 標題 */}
+          <div className="bg-slate-50 px-6 py-4 border-b border-slate-100 flex justify-between items-center">
+            <h2 className="font-bold text-slate-700 flex items-center gap-2">
+              <FileCheck size={18} className="text-purple-600" /> 審查資料
+            </h2>
+          </div>
+
+          {/* 子分頁 */}
+          <div className="flex border-b border-slate-100">
+            <button
+              onClick={() => setCertActiveTab("cert")}
+              className={`flex items-center gap-2 px-5 py-4 text-sm font-bold whitespace-nowrap transition border-b-2 ${certActiveTab === "cert" ? "border-primary text-primary bg-primary/5" : "border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50"}`}
+            >
+              <Award size={15} /> 資格證明
+              {pendingReviews.length > 0 && (
+                <span className="px-1.5 py-0.5 bg-orange-500 text-white text-[10px] font-black rounded-full">
+                  {pendingReviews.length}
+                </span>
+              )}
+            </button>
+            <button
+              onClick={() => setCertActiveTab("hours")}
+              className={`flex items-center gap-2 px-5 py-4 text-sm font-bold whitespace-nowrap transition border-b-2 ${certActiveTab === "hours" ? "border-primary text-primary bg-primary/5" : "border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50"}`}
+            >
+              <Clock size={15} /> 時數證明
+              <span className="px-1.5 py-0.5 bg-slate-100 text-slate-400 text-[10px] font-black rounded-full">
+                即將開放
+              </span>
+            </button>
+          </div>
+
+          {/* 資格證明內容 */}
+          {certActiveTab === "cert" && (
+            <div className="p-6">
+              {studentsList.length === 0 ? (
+                <div className="py-16 text-center text-slate-400 font-medium">
+                  <FileCheck
+                    size={40}
+                    className="mx-auto mb-3 text-slate-200"
+                  />
+                  尚無資格證明資料
+                </div>
+              ) : (
+                <div className="flex flex-col gap-4">
+                  {/* 待審區塊 */}
+                  {pendingReviews.length > 0 && (
+                    <div>
+                      <h3 className="text-sm font-bold text-orange-600 flex items-center gap-2 mb-3">
+                        <Clock size={15} /> 待審核（{pendingReviews.length} 件）
+                      </h3>
+                      <div className="flex flex-col gap-3">
+                        {pendingReviews.map((student, idx) => (
+                          <div
+                            key={idx}
+                            className="p-5 border border-orange-200 bg-orange-50/40 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                          >
+                            <div className="flex-grow">
+                              <div className="flex items-center gap-2 mb-2">
+                                <span className="px-2 py-0.5 bg-blue-100 text-blue-700 text-xs font-bold rounded">
+                                  小老師
+                                </span>
+                                <h4 className="font-bold text-slate-800">
+                                  {student.chinese_name} ({student.student_id})
+                                </h4>
+                              </div>
+                              {student.certification_file && (
+                                <div className="flex items-center gap-3 flex-wrap">
+                                  <span className="text-sm text-slate-500 truncate max-w-xs">
+                                    {student.certification_file}
+                                  </span>
+                                  <button
+                                    onClick={() =>
+                                      setPreviewFileUrl(
+                                        `http://localhost:3001/uploads/${student.certification_file}`,
+                                      )
+                                    }
+                                    className="flex items-center text-xs font-bold text-blue-600 hover:text-blue-700 bg-blue-50 border border-blue-200 px-3 py-1.5 rounded-lg transition"
+                                  >
+                                    <Eye size={13} className="mr-1" /> 預覽
+                                  </button>
+                                  <a
+                                    href={`http://localhost:3001/uploads/${student.certification_file}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    download
+                                    className="flex items-center text-xs font-bold text-slate-600 hover:text-slate-800 bg-white border border-slate-200 px-3 py-1.5 rounded-lg transition"
+                                  >
+                                    <Download size={13} className="mr-1" /> 下載
+                                  </a>
+                                </div>
+                              )}
+                            </div>
+                            <div className="flex gap-2 flex-shrink-0">
+                              <button
+                                onClick={() =>
+                                  setReviewModal({ isOpen: true, student })
+                                }
+                                className="px-4 py-2 bg-slate-700 text-white text-sm font-bold rounded-xl hover:bg-slate-800 transition shadow-sm"
+                              >
+                                開始審查
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 已審區塊 */}
+                  {(() => {
+                    const reviewed = studentsList.filter(
+                      (s) =>
+                        s.certification_file &&
+                        s.certification_status !== "pending",
+                    );
+                    if (reviewed.length === 0) return null;
+                    return (
+                      <div className="mt-4">
+                        <h3 className="text-sm font-bold text-slate-500 flex items-center gap-2 mb-3">
+                          <CheckCircle size={15} /> 已審核（{reviewed.length}{" "}
+                          件）
+                        </h3>
+                        <div className="flex flex-col gap-3">
+                          {reviewed.map((student, idx) => (
+                            <div
+                              key={idx}
+                              className={`p-5 border rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${student.certification_status === "approved" ? "border-green-200 bg-green-50/30" : "border-red-200 bg-red-50/20"}`}
+                            >
+                              <div className="flex-grow">
+                                <div className="flex items-center gap-2 mb-2">
+                                  <h4 className="font-bold text-slate-700">
+                                    {student.chinese_name} ({student.student_id}
+                                    )
+                                  </h4>
+                                </div>
+                                {student.certification_file && (
+                                  <div className="flex items-center gap-3 flex-wrap">
+                                    <span className="text-sm text-slate-400 truncate max-w-xs">
+                                      {student.certification_file}
+                                    </span>
+                                    <button
+                                      onClick={() =>
+                                        setPreviewFileUrl(
+                                          `http://localhost:3001/uploads/${student.certification_file}`,
+                                        )
+                                      }
+                                      className="flex items-center text-xs font-bold text-slate-500 hover:text-slate-700 bg-white border border-slate-200 px-3 py-1.5 rounded-lg transition"
+                                    >
+                                      <Eye size={13} className="mr-1" /> 預覽
+                                    </button>
+                                    <a
+                                      href={`http://localhost:3001/uploads/${student.certification_file}`}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      download
+                                      className="flex items-center text-xs font-bold text-slate-500 hover:text-slate-700 bg-white border border-slate-200 px-3 py-1.5 rounded-lg transition"
+                                    >
+                                      <Download size={13} className="mr-1" />{" "}
+                                      下載
+                                    </a>
+                                  </div>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-3 flex-shrink-0">
+                                {student.certification_status ===
+                                  "approved" && (
+                                  <span className="flex items-center gap-1 px-3 py-1.5 bg-green-100 text-green-700 text-xs font-bold rounded-full">
+                                    <CheckCircle size={13} /> 已通過
+                                  </span>
+                                )}
+                                {student.certification_status ===
+                                  "resubmit" && (
+                                  <span className="flex items-center gap-1 px-3 py-1.5 bg-red-100 text-red-600 text-xs font-bold rounded-full">
+                                    <XCircle size={13} /> 已退件
+                                  </span>
+                                )}
+                                {/* 可重新審查 */}
+                                <button
+                                  onClick={() =>
+                                    setReviewModal({ isOpen: true, student })
+                                  }
+                                  className="px-3 py-1.5 bg-white border border-slate-200 text-slate-500 text-xs font-bold rounded-lg hover:border-slate-300 transition"
+                                >
+                                  重新審查
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* 尚未上傳 */}
+                  {(() => {
+                    const noFile = studentsList.filter(
+                      (s) => !s.certification_file,
+                    );
+                    if (noFile.length === 0) return null;
+                    return (
+                      <div className="mt-4">
+                        <h3 className="text-sm font-bold text-slate-400 flex items-center gap-2 mb-3">
+                          尚未上傳（{noFile.length} 人）
+                        </h3>
+                        <div className="flex flex-col gap-2">
+                          {noFile.map((student, idx) => (
+                            <div
+                              key={idx}
+                              className="px-5 py-3 border border-slate-100 rounded-xl flex items-center justify-between bg-slate-50/50"
+                            >
+                              <span className="text-sm font-medium text-slate-500">
+                                {student.chinese_name} ({student.student_id})
+                              </span>
+                              <span className="text-xs text-slate-400 font-medium">
+                                尚未上傳文件
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* 時數證明（佔位） */}
+          {certActiveTab === "hours" && (
+            <div className="py-16 text-center text-slate-400 font-medium">
+              <Clock size={40} className="mx-auto mb-3 text-slate-200" />
+              時數證明審查功能即將開放
+            </div>
+          )}
+        </div>
+      </main>
+    );
   };
 
   // ── 介面：簽到管理 ──────────────────────────────────────
@@ -1028,6 +1279,14 @@ function AdminDashboard() {
               <Clock size={18} className="mr-2" /> 待審查資料 (
               {pendingReviews.length})
             </h2>
+            {pendingReviews.length > 0 && (
+              <button
+                onClick={() => setActiveTab("review-data")}
+                className="text-xs text-orange-600 hover:underline font-bold"
+              >
+                前往審查 →
+              </button>
+            )}
           </div>
           <div className="p-4 flex flex-col gap-3">
             {pendingReviews.length > 0 ? (
@@ -1113,69 +1372,6 @@ function AdminDashboard() {
           </div>
         </div>
       </main>
-
-      <aside className="w-full md:w-64">
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden h-full min-h-[400px]">
-          <div className="bg-slate-50 px-5 py-4 border-b border-slate-100 flex items-center">
-            <Bell size={18} className="text-slate-500 mr-2" />
-            <h3 className="font-bold text-slate-800">系統通知</h3>
-          </div>
-          <div className="p-4 flex flex-col gap-4">
-            <div className="flex gap-3">
-              <div className="w-2 h-2 rounded-full bg-slate-300 mt-1.5"></div>
-              <div>
-                <p className="text-sm font-medium text-slate-600 mb-0.5">
-                  系統運作正常
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-      </aside>
-
-      {/* 資格審查 Modal */}
-      {reviewModal.isOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-fade-in">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
-            <div className="px-6 py-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
-              <h3 className="font-bold text-lg text-slate-800 flex items-center">
-                <FileCheck className="mr-2 text-primary" size={20} /> 資格審查
-              </h3>
-              <button
-                onClick={() => setReviewModal({ isOpen: false, student: null })}
-                className="text-slate-400 hover:text-red-500"
-              >
-                <X size={20} />
-              </button>
-            </div>
-            <div className="p-6">
-              <p className="text-slate-600 mb-6 leading-relaxed">
-                正在審查 <b>{reviewModal.student.chinese_name}</b> (
-                {reviewModal.student.student_id}) 的資格證明。
-                <br />
-                <br />
-                請確認其上傳之檔案{" "}
-                <b>{reviewModal.student.certification_file}</b>{" "}
-                是否符合本系擔任小老師之標準。
-              </p>
-              <div className="flex gap-3 mt-6 pt-6 border-t border-slate-100">
-                <button
-                  onClick={() => handleReviewSubmit("resubmit")}
-                  className="flex-1 py-3 bg-red-50 text-red-600 font-bold rounded-xl hover:bg-red-100 transition border border-red-200"
-                >
-                  退回 / 要求補件
-                </button>
-                <button
-                  onClick={() => handleReviewSubmit("approved")}
-                  className="flex-1 py-3 bg-green-500 text-white font-bold rounded-xl hover:bg-green-600 transition shadow-sm"
-                >
-                  ✅ 審查通過
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </>
   );
 
@@ -1466,17 +1662,12 @@ function AdminDashboard() {
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
       <header className="bg-white shadow-sm h-16 flex items-center justify-between px-6 sticky top-0 z-20">
-        <div className="flex items-center space-x-8">
+        <div className="flex items-center pl-2">
           <img
             src={logoImg}
             alt="Logo"
-            className="h-15 w-auto object-contain"
+            className="h-16 w-auto object-contain"
           />
-          <nav className="hidden md:flex space-x-1 bg-slate-100 p-1 rounded-lg">
-            <span className="px-5 py-1.5 bg-white text-primary font-bold rounded-md shadow-sm text-sm cursor-default">
-              主控台
-            </span>
-          </nav>
         </div>
         <div className="flex items-center space-x-5">
           <div className="hidden lg:flex items-center bg-slate-100 px-3 py-1.5 rounded-full">
@@ -1488,17 +1679,112 @@ function AdminDashboard() {
             />
           </div>
 
-          <button
-            onClick={() => setActiveTab("emergency")}
-            className="relative text-slate-400 hover:text-red-500 transition"
-          >
-            <Bell size={20} />
-            {unreadCount > 0 && (
-              <span className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-500 text-white text-[10px] font-black rounded-full flex items-center justify-center animate-pulse">
-                {unreadCount > 9 ? "9+" : unreadCount}
-              </span>
+          <div className="relative" data-notif-dropdown>
+            <button
+              onClick={() => setNotifDropdownOpen((prev) => !prev)}
+              className="relative text-slate-400 hover:text-primary transition"
+            >
+              <Bell size={20} />
+              {unreadCount > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-500 text-white text-[10px] font-black rounded-full flex items-center justify-center animate-pulse">
+                  {unreadCount > 9 ? "9+" : unreadCount}
+                </span>
+              )}
+            </button>
+
+            {notifDropdownOpen && (
+              <div className="absolute right-0 mt-3 w-96 bg-white rounded-2xl shadow-xl border border-slate-100 overflow-hidden z-50">
+                {/* 標題 */}
+                <div className="px-4 py-3 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                  <span className="font-bold text-slate-700 text-sm flex items-center gap-2">
+                    <Bell size={15} className="text-primary" /> 通知
+                    {unreadCount > 0 && (
+                      <span className="px-1.5 py-0.5 bg-red-500 text-white text-[10px] font-black rounded-full">
+                        {unreadCount}
+                      </span>
+                    )}
+                  </span>
+                  <button
+                    onClick={() => {
+                      setActiveTab("emergency");
+                      setNotifDropdownOpen(false);
+                    }}
+                    className="text-xs text-primary font-bold hover:underline"
+                  >
+                    查看全部緊急通報 →
+                  </button>
+                </div>
+
+                {/* 通知列表 */}
+                <div className="max-h-96 overflow-y-auto divide-y divide-slate-50">
+                  {/* 待審申請 */}
+                  {pendingCounts.total > 0 && (
+                    <div
+                      onClick={() => {
+                        setActiveTab("checkin-mgmt");
+                        setNotifDropdownOpen(false);
+                      }}
+                      className="flex items-start gap-3 px-4 py-3 hover:bg-amber-50 cursor-pointer transition"
+                    >
+                      <div className="w-8 h-8 bg-amber-100 text-amber-600 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
+                        <Clock size={15} />
+                      </div>
+                      <div>
+                        <p className="text-sm font-bold text-slate-800">
+                          待審核申請（{pendingCounts.total} 件）
+                        </p>
+                        <p className="text-xs text-slate-400 mt-0.5">
+                          補簽到 {pendingCounts.makeupCheckinCount} 件・補填紀錄{" "}
+                          {pendingCounts.makeupNotesCount} 件
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 緊急通報（未讀） */}
+                  {emergencyAlerts
+                    .filter((a) => !a.is_read)
+                    .slice(0, 5)
+                    .map((alert) => (
+                      <div
+                        key={alert.id}
+                        onClick={() => {
+                          handleOpenAlert(alert);
+                          setNotifDropdownOpen(false);
+                        }}
+                        className="flex items-start gap-3 px-4 py-3 hover:bg-red-50 cursor-pointer transition bg-red-50/40"
+                      >
+                        <div className="w-8 h-8 bg-red-100 text-red-500 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
+                          <AlertTriangle size={15} />
+                        </div>
+                        <div className="flex-grow min-w-0">
+                          <p className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
+                            <span className="w-2 h-2 bg-red-500 rounded-full flex-shrink-0 animate-pulse" />
+                            🚨 緊急通報
+                          </p>
+                          <p className="text-xs text-slate-600 mt-0.5 truncate">
+                            {alert.sender_role === "tutor"
+                              ? `${alert.chinese_name || alert.english_name} 老師回報：找不到學生`
+                              : `${alert.chinese_name || alert.english_name} 學生回報：找不到老師`}
+                          </p>
+                          <p className="text-[10px] text-slate-400 mt-0.5">
+                            {formatDateTime(alert.created_at)}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+
+                  {/* 空狀態 */}
+                  {unreadCount === 0 && pendingCounts.total === 0 && (
+                    <div className="px-4 py-8 text-center text-slate-400 text-sm">
+                      <Bell size={28} className="mx-auto mb-2 text-slate-200" />
+                      目前沒有新通知
+                    </div>
+                  )}
+                </div>
+              </div>
             )}
-          </button>
+          </div>
 
           <div className="relative">
             <div
@@ -1511,15 +1797,46 @@ function AdminDashboard() {
               <ChevronDown size={16} className="text-slate-400" />
             </div>
             {isProfileMenuOpen && (
-              <div className="absolute right-0 mt-2 w-56 bg-white rounded-xl shadow-lg border border-slate-100 overflow-hidden z-50">
-                <div className="py-2 border-t border-slate-100">
-                  <button
-                    onClick={handleLogout}
-                    className="w-full flex items-center px-4 py-2 text-sm font-medium text-red-500 hover:bg-red-50 transition"
-                  >
-                    <LogOut size={16} className="mr-3" /> 登出
-                  </button>
+              <div className="relative">
+                <div
+                  className="flex items-center space-x-2 cursor-pointer hover:bg-slate-50 p-1 rounded-md transition"
+                  onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}
+                >
+                  <div className="w-9 h-9 bg-purple-100 text-purple-600 rounded-full flex items-center justify-center">
+                    <User size={18} />
+                  </div>
+                  <ChevronDown size={16} className="text-slate-400" />
                 </div>
+                {isProfileMenuOpen && (
+                  <div className="absolute right-0 mt-2 w-56 bg-white rounded-xl shadow-lg border border-slate-100 overflow-hidden z-50">
+                    <div className="px-4 py-3 border-b border-slate-100">
+                      <p className="font-bold text-slate-800">
+                        {userInfo.chineseName ||
+                          userInfo.englishName ||
+                          "管理員"}
+                      </p>
+                      <span className="text-[10px] bg-purple-100 text-purple-600 px-2 py-0.5 rounded-full font-bold mt-1 inline-block">
+                        Admin
+                      </span>
+                    </div>
+                    <div className="py-2">
+                      <button
+                        onClick={() => alert("使用手冊說明內容即將上線！")}
+                        className="w-full flex items-center px-4 py-2 text-sm text-slate-600 hover:bg-slate-50 hover:text-primary transition"
+                      >
+                        <BookOpen size={16} className="mr-3" /> 使用手冊說明
+                      </button>
+                    </div>
+                    <div className="py-2 border-t border-slate-100">
+                      <button
+                        onClick={handleLogout}
+                        className="w-full flex items-center px-4 py-2 text-sm font-medium text-red-500 hover:bg-red-50 transition"
+                      >
+                        <LogOut size={16} className="mr-3" /> 登出
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -1606,8 +1923,20 @@ function AdminDashboard() {
                 </div>
                 緊急通報
               </li>
-              <li className="flex items-center p-3 rounded-xl cursor-pointer transition hover:bg-slate-50">
-                <FileCheck size={20} className="mr-4 text-slate-400" /> 審查資料
+              <li
+                onClick={() => setActiveTab("review-data")}
+                className={`flex items-center p-3 rounded-xl cursor-pointer transition ${activeTab === "review-data" ? "bg-purple-50 text-purple-600 font-bold" : "hover:bg-slate-50"}`}
+              >
+                <FileCheck
+                  size={20}
+                  className={`mr-4 ${activeTab === "review-data" ? "text-purple-600" : "text-slate-400"}`}
+                />
+                審查資料
+                {pendingReviews.length > 0 && (
+                  <span className="ml-auto text-[10px] bg-orange-500 text-white font-bold px-1.5 py-0.5 rounded-full">
+                    {pendingReviews.length}
+                  </span>
+                )}
               </li>
               <li
                 onClick={() => setActiveTab("unmatch")}
@@ -1640,7 +1969,9 @@ function AdminDashboard() {
               ? renderCheckinMgmt()
               : activeTab === "unmatch"
                 ? renderUnmatchRequests()
-                : renderStudentDirectory()}
+                : activeTab === "review-data"
+                  ? renderReviewData()
+                  : renderStudentDirectory()}
       </div>
 
       {/* 詳細內容 Modal（補簽到 / 補填 / 課堂紀錄） */}
@@ -1951,6 +2282,50 @@ function AdminDashboard() {
                   </p>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 資格審查 Modal */}
+      {reviewModal.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-fade-in">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
+              <h3 className="font-bold text-lg text-slate-800 flex items-center">
+                <FileCheck className="mr-2 text-primary" size={20} /> 資格審查
+              </h3>
+              <button
+                onClick={() => setReviewModal({ isOpen: false, student: null })}
+                className="text-slate-400 hover:text-red-500"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            <div className="p-6">
+              <p className="text-slate-600 mb-6 leading-relaxed">
+                正在審查 <b>{reviewModal.student.chinese_name}</b> (
+                {reviewModal.student.student_id}) 的資格證明。
+                <br />
+                <br />
+                請確認其上傳之檔案{" "}
+                <b>{reviewModal.student.certification_file}</b>{" "}
+                是否符合本系擔任小老師之標準。
+              </p>
+              <div className="flex gap-3 mt-6 pt-6 border-t border-slate-100">
+                <button
+                  onClick={() => handleReviewSubmit("resubmit")}
+                  className="flex-1 py-3 bg-red-50 text-red-600 font-bold rounded-xl hover:bg-red-100 transition border border-red-200"
+                >
+                  退回 / 要求補件
+                </button>
+                <button
+                  onClick={() => handleReviewSubmit("approved")}
+                  className="flex-1 py-3 bg-green-500 text-white font-bold rounded-xl hover:bg-green-600 transition shadow-sm"
+                >
+                  ✅ 審查通過
+                </button>
+              </div>
             </div>
           </div>
         </div>

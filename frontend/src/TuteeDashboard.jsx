@@ -59,6 +59,16 @@ function ChatWindow({ myUserId, myAccount, partner, onClose, wsRef, onRead }) {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  useEffect(() => {
+    if (!notifDropdownOpen) return;
+    const handleClick = (e) => {
+      if (!e.target.closest("[data-notif-dropdown]"))
+        setNotifDropdownOpen(false);
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [notifDropdownOpen]);
+
   const handleSend = async () => {
     if (!input.trim()) return;
     const content = input.trim();
@@ -241,6 +251,8 @@ function TuteeDashboard() {
   const [contacts, setContacts] = useState([]);
   const wsRef = useRef(null);
 
+  const [notifDropdownOpen, setNotifDropdownOpen] = useState(false);
+
   // ─── fetch helpers ───
   const fetchMakeupRemaining = (userId) =>
     fetch(`http://localhost:3001/api/makeup-remaining/${userId}`)
@@ -308,6 +320,8 @@ function TuteeDashboard() {
             setUserInfo({
               ...result.data,
               account,
+              chineseName: result.data.chinese_name || "",
+              englishName: result.data.english_name || "",
               matched_tutor_id: result.data.matched_tutor_id,
             });
             if (result.data.matched_tutor_id) {
@@ -358,6 +372,9 @@ function TuteeDashboard() {
     return () => document.removeEventListener("mousedown", handleClick);
   }, [msgDropdownOpen]);
 
+  const displayName = userInfo.chinese_Name
+    ? `${userInfo.chinese_name} ${userInfo.english_name}`
+    : userInfo.english_name || "Student";
   const avatarInitial = userInfo.englishName
     ? userInfo.englishName.charAt(0).toUpperCase()
     : "S";
@@ -1376,31 +1393,12 @@ function TuteeDashboard() {
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
       {/* Header */}
       <header className="bg-white shadow-sm h-16 flex items-center justify-between px-6 sticky top-0 z-20">
-        <div className="flex items-center space-x-8">
-          <img src={logoImg} alt="Logo" className="h-8 w-auto object-contain" />
-          <nav className="hidden md:flex space-x-1 bg-slate-100 p-1 rounded-lg">
-            <button
-              onClick={() => setActiveTab("home")}
-              className={`px-5 py-1.5 font-bold rounded-md shadow-sm text-sm transition ${activeTab === "home" ? "bg-white text-primary" : "text-slate-500 hover:text-primary"}`}
-            >
-              首頁
-            </button>
-            <button
-              onClick={() => setActiveTab("my-tutor")}
-              className={`px-5 py-1.5 font-bold rounded-md shadow-sm text-sm transition ${activeTab === "my-tutor" ? "bg-white text-primary" : "text-slate-500 hover:text-primary"}`}
-            >
-              我的老師
-            </button>
-            <button
-              onClick={() => setActiveTab("history")}
-              className={`px-5 py-1.5 font-bold rounded-md shadow-sm text-sm transition ${activeTab === "history" ? "bg-white text-primary" : "text-slate-500 hover:text-primary"}`}
-            >
-              紀錄
-            </button>
-            <button className="px-5 py-1.5 text-slate-500 font-medium hover:text-primary transition text-sm">
-              紙本
-            </button>
-          </nav>
+        <div className="flex items-center pl-2">
+          <img
+            src={logoImg}
+            alt="Logo"
+            className="h-16 w-auto object-contain"
+          />
         </div>
         <div className="flex items-center space-x-5">
           {/* 私訊下拉 */}
@@ -1492,31 +1490,82 @@ function TuteeDashboard() {
             )}
           </div>
 
+          {/* 通知鈴鐺 */}
+          <div className="relative" data-notif-dropdown>
+            <button
+              onClick={() => setNotifDropdownOpen((prev) => !prev)}
+              className="relative text-slate-400 hover:text-primary transition"
+            >
+              <Bell size={20} />
+            </button>
+
+            {notifDropdownOpen && (
+              <div className="absolute right-0 mt-3 w-80 bg-white rounded-2xl shadow-xl border border-slate-100 overflow-hidden z-50">
+                <div className="px-4 py-3 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                  <span className="font-bold text-slate-700 text-sm flex items-center gap-2">
+                    <Bell size={15} className="text-primary" /> 通知
+                  </span>
+                  <button
+                    onClick={() => setNotifDropdownOpen(false)}
+                    className="text-slate-400 hover:text-slate-600"
+                  >
+                    <X size={15} />
+                  </button>
+                </div>
+                <div className="px-4 py-8 text-center text-slate-400 text-sm">
+                  <Bell size={28} className="mx-auto mb-2 text-slate-200" />
+                  通知功能即將上線
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* 個人選單 */}
           <div className="relative">
             <div
               className="flex items-center space-x-2 cursor-pointer hover:bg-slate-50 p-1 rounded-md transition"
               onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}
             >
-              <div className="w-9 h-9 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center font-bold text-sm">
-                {avatarInitial}
+              <div className="w-9 h-9 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center">
+                <User size={18} />
               </div>
               <ChevronDown size={16} className="text-slate-400" />
             </div>
             {isProfileMenuOpen && (
-              <div className="absolute right-0 mt-2 w-48 bg-white rounded-xl shadow-lg border border-slate-100 overflow-hidden z-50">
-                <button
-                  onClick={() => navigate("/profile")}
-                  className="w-full flex items-center px-4 py-3 text-sm text-slate-600 hover:bg-slate-50 hover:text-primary border-b border-slate-100"
-                >
-                  <User size={16} className="mr-3" /> 個人資訊
-                </button>
-                <button
-                  onClick={handleLogout}
-                  className="w-full flex items-center px-4 py-3 text-sm font-medium text-red-500 hover:bg-red-50 transition"
-                >
-                  <LogOut size={16} className="mr-3" /> 登出
-                </button>
+              <div className="absolute right-0 mt-2 w-56 bg-white rounded-xl shadow-lg border border-slate-100 overflow-hidden z-50">
+                <div className="px-4 py-3 border-b border-slate-100">
+                  <p
+                    className="font-bold text-slate-800 truncate"
+                    title={displayName}
+                  >
+                    {displayName}
+                  </p>
+                  <span className="text-[10px] bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full font-bold mt-1 inline-block">
+                    學生
+                  </span>
+                </div>
+                <div className="py-2">
+                  <button
+                    onClick={() => navigate("/profile")}
+                    className="w-full flex items-center px-4 py-2 text-sm text-slate-600 hover:bg-slate-50 hover:text-primary transition"
+                  >
+                    <User size={16} className="mr-3" /> 個人資訊
+                  </button>
+                  <button
+                    onClick={() => alert("使用手冊說明內容即將上線！")}
+                    className="w-full flex items-center px-4 py-2 text-sm text-slate-600 hover:bg-slate-50 hover:text-primary transition"
+                  >
+                    <BookOpen size={16} className="mr-3" /> 使用手冊說明
+                  </button>
+                </div>
+                <div className="py-2 border-t border-slate-100">
+                  <button
+                    onClick={handleLogout}
+                    className="w-full flex items-center px-4 py-2 text-sm font-medium text-red-500 hover:bg-red-50 transition"
+                  >
+                    <LogOut size={16} className="mr-3" /> 登出
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -1540,17 +1589,7 @@ function TuteeDashboard() {
                   size={20}
                   className={`mr-4 ${activeTab === "home" ? "text-primary" : "text-slate-400 group-hover:text-primary"}`}
                 />{" "}
-                首頁主控台
-              </li>
-              <li
-                onClick={() => navigate("/profile")}
-                className="flex items-center p-3 rounded-xl hover:bg-slate-50 hover:text-primary cursor-pointer transition group text-slate-600"
-              >
-                <User
-                  size={20}
-                  className="mr-4 text-slate-400 group-hover:text-primary"
-                />{" "}
-                個人資訊
+                首頁
               </li>
               <li
                 onClick={() => setActiveTab("my-tutor")}
@@ -1571,13 +1610,6 @@ function TuteeDashboard() {
                   className={`mr-4 ${activeTab === "history" ? "text-primary" : "text-slate-400 group-hover:text-primary"}`}
                 />{" "}
                 上課紀錄
-              </li>
-              <li className="flex items-center p-3 rounded-xl hover:bg-slate-50 hover:text-primary cursor-pointer transition group text-slate-600">
-                <Bell
-                  size={20}
-                  className="mr-4 text-slate-400 group-hover:text-primary"
-                />{" "}
-                通知 Notifications
               </li>
             </ul>
           </div>

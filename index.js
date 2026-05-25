@@ -270,7 +270,7 @@ app.get("/api/profile/:account", async (req, res) => {
   }
 });
 
-// 🚀 第七支 API：儲存小老師檔案 (POST)
+// 🚀 第七支 API：儲存老師檔案 (POST)
 app.post(
   "/api/tutor-profile",
   upload.single("certificationFile"),
@@ -314,7 +314,7 @@ app.post(
       await pool.query(
         `INSERT INTO tutor_profiles 
       (user_id, student_status, program, nationality, department, phone, 
-       level_listening, level_speaking, level_reading, level_writing, teaching_notes, available_times, certification_file) 
+       level_listening, level_speaking, level_reading, level_writing, teaching_notes, available_times, certification_file, gender) 
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
         [
           userId,
@@ -334,9 +334,9 @@ app.post(
         ],
       );
 
-      res.json({ success: true, message: "小老師資料與檔案建立成功！" });
+      res.json({ success: true, message: "老師資料與檔案建立成功！" });
     } catch (error) {
-      console.error("儲存小老師資料失敗:", error);
+      console.error("儲存老師資料失敗:", error);
       res.status(500).json({ success: false, message: "伺服器發生錯誤" });
     }
   },
@@ -570,6 +570,20 @@ app.post("/api/match/respond", async (req, res) => {
         `INSERT INTO match_history (tutor_id, tutee_id, is_active)
      VALUES ($1, $2, TRUE)
      ON CONFLICT DO NOTHING`,
+        [tutorUserId, tuteeId],
+      );
+
+      // ← 新增：同時把這個 tutor 對其他 tutee 的 pending 邀請也全部拒絕
+      await pool.query(
+        `UPDATE match_requests SET status = 'rejected'
+     WHERE tutor_id = $1 AND status = 'pending' AND tutee_id != $2`,
+        [tutorUserId, tuteeId],
+      );
+
+      // ← 新增：寫入配對歷史
+      await pool.query(
+        `INSERT INTO match_history (tutor_id, tutee_id, is_active)
+     VALUES ($1, $2, TRUE) ON CONFLICT DO NOTHING`,
         [tutorUserId, tuteeId],
       );
       return res.json({ success: true, message: "🎉 配對成功！" });
@@ -2151,6 +2165,13 @@ app.post("/api/admin/unmatch-requests/:id/review", async (req, res) => {
          WHERE tutor_id = $1 AND tutee_id = $2
            AND class_date >= CURRENT_DATE
            AND status != 'cancelled'`,
+        [tutor_id, tutee_id],
+      );
+
+      // ← 新增：把這筆配對的 match_requests 改回 rejected，讓學生重新開放
+      await pool.query(
+        `UPDATE match_requests SET status = 'rejected'
+     WHERE tutor_id = $1 AND tutee_id = $2 AND status = 'accepted'`,
         [tutor_id, tutee_id],
       );
     }

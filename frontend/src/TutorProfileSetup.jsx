@@ -61,11 +61,7 @@ function TutorProfileSetup() {
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
-    if (name === "studentStatus" && value === "本地生") {
-      setFormData({ ...formData, [name]: value, nationality: "台灣 (Taiwan)" });
-    } else {
-      setFormData({ ...formData, [name]: value });
-    }
+    setFormData({ ...formData, [name]: value });
   };
 
   const handleDayToggle = (dayId) => {
@@ -265,33 +261,20 @@ function TutorProfileSetup() {
                 <label className="block text-sm font-bold text-slate-700 mb-1">
                   性別 Gender <span className="text-red-500">*</span>
                 </label>
-                <div className="flex gap-3">
-                  {[
-                    { val: "male", label: "男性" },
-                    { val: "female", label: "女性" },
-                    { val: "other", label: "非二元性別" },
-                  ].map((g) => (
-                    <label key={g.val} className="flex-1 cursor-pointer">
-                      <input
-                        type="radio"
-                        name="gender"
-                        value={g.val}
-                        checked={formData.gender === g.val}
-                        onChange={handleInputChange}
-                        className="sr-only"
-                      />
-                      <div
-                        className={`text-center px-3 py-2.5 rounded-lg border-2 font-bold text-sm transition-all ${
-                          formData.gender === g.val
-                            ? "bg-blue-50 border-blue-400 text-blue-700 shadow-sm"
-                            : "bg-white border-slate-200 text-slate-500 hover:border-blue-200"
-                        }`}
-                      >
-                        {g.label}
-                      </div>
-                    </label>
-                  ))}
-                </div>
+                <select
+                  name="gender"
+                  value={formData.gender}
+                  onChange={handleInputChange}
+                  required
+                  className="w-full border border-slate-300 rounded-lg px-4 py-2.5 outline-none bg-white"
+                >
+                  <option value="" disabled>
+                    請選擇性別
+                  </option>
+                  <option value="male">男 Male</option>
+                  <option value="female">女 Female</option>
+                  <option value="other">非二元性別 Non-binary</option>
+                </select>
               </div>
 
               <div>
@@ -308,35 +291,32 @@ function TutorProfileSetup() {
                   <option value="" disabled>
                     請選擇學程
                   </option>
-                  <option value="學士班">學士班</option>
                   <option value="碩士班">碩士班</option>
                   <option value="博士班">博士班</option>
                 </select>
               </div>
 
-              {formData.studentStatus !== "本地生" && (
-                <div>
-                  <label className="block text-sm font-bold text-slate-700 mb-1">
-                    國籍 <span className="text-red-500">*</span>
-                  </label>
-                  <select
-                    name="nationality"
-                    value={formData.nationality}
-                    onChange={handleInputChange}
-                    required
-                    className="w-full border border-slate-300 rounded-lg px-4 py-2.5 outline-none bg-white"
-                  >
-                    <option value="" disabled>
-                      請選擇國籍
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-1">
+                  國籍 <span className="text-red-500">*</span>
+                </label>
+                <select
+                  name="nationality"
+                  value={formData.nationality}
+                  onChange={handleInputChange}
+                  required
+                  className="w-full border border-slate-300 rounded-lg px-4 py-2.5 outline-none bg-white"
+                >
+                  <option value="" disabled>
+                    請選擇國籍
+                  </option>
+                  {countryList.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
                     </option>
-                    {countryList.map((c) => (
-                      <option key={c} value={c}>
-                        {c}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
+                  ))}
+                </select>
+              </div>
 
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-1">
