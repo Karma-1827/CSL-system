@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import logoImg from "./assets/csl-Logo.png";
+import Certificate from "./Certificate";
 
 const DAYS_MAP = { Mon: "一", Tue: "二", Wed: "三", Thu: "四", Fri: "五" };
 const SKILL_MAP = {
@@ -3117,5 +3118,61 @@ function TutorDashboard() {
     </div>
   );
 }
+
+const TutorDashboard = () => {
+  // 這裡的資料之後會是從你的後端 API 抓回來的
+  const mockData = {
+    studentName: "陸永強",
+    studentId: "610332XXX",
+    totalHours: 100,
+    date: "115 年 05 月 27 日",
+    records: [
+      { date: "2025/11/01", hours: 20 },
+      { date: "2025/12/15", hours: 30 },
+      { date: "2026/03/10", hours: 25 },
+      { date: "2026/04/20", hours: 25 },
+    ],
+  };
+
+  return (
+    <div>
+      <h1>輔導老師儀表板</h1>
+      {/* 渲染證書預覽與下載按鈕 */}
+      <Certificate
+        studentName={mockData.studentName}
+        studentId={mockData.studentId}
+        records={mockData.records}
+        totalHours={mockData.totalHours}
+        date={mockData.date}
+      />
+    </div>
+  );
+  const mockData = {
+    studentName: "陸永強",
+    studentId: "610332XXX",
+    totalHours: 100,
+    date: "115 年 05 月 27 日",
+    records: [
+      { date: "2025/11/01", hours: 20 },
+      { date: "2025/12/15", hours: 30 },
+      { date: "2026/03/10", hours: 25 },
+      { date: "2026/04/20", hours: 25 },
+    ],
+  };
+
+  return (
+    <div>
+      <h1>輔導老師儀表板</h1>
+      {/* 渲染證書預覽與下載按鈕 */}
+      <Certificate
+        studentName={mockData.studentName}
+        studentId={mockData.studentId}
+        records={mockData.records}
+        totalHours={mockData.totalHours}
+        date={mockData.date}
+      />
+    </div>
+  );
+};
 
 export default TutorDashboard;
