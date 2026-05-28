@@ -29,6 +29,7 @@ import {
   UserCheck,
   AlertCircle,
   Award,
+  FolderOpen,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import logoImg from "./assets/csl-Logo.png";
@@ -62,25 +63,19 @@ function AdminDashboard() {
 
   // ── 簽到管理相關 state ──────────────────────────────────
   const [checkinSubTab, setCheckinSubTab] = useState("checkin-records");
-  // 一般簽到紀錄
   const [checkinRecords, setCheckinRecords] = useState([]);
-  // 補簽到申請
   const [makeupCheckins, setMakeupCheckins] = useState([]);
-  // 課堂紀錄
   const [classNotes, setClassNotes] = useState([]);
-  // 補填申請
   const [makeupNotes, setMakeupNotes] = useState([]);
-  // 待審計數
   const [pendingCounts, setPendingCounts] = useState({
     makeupCheckinCount: 0,
     makeupNotesCount: 0,
     total: 0,
   });
-  // 詳細內容 Modal
   const [detailModal, setDetailModal] = useState({
     isOpen: false,
     data: null,
-    type: "", // 'makeup-checkin' | 'makeup-notes' | 'notes'
+    type: "",
   });
   const [certActiveTab, setCertActiveTab] = useState("cert");
 
@@ -105,7 +100,6 @@ function AdminDashboard() {
     } else navigate("/");
   }, [navigate]);
 
-  // 撈緊急通報
   const fetchEmergencyAlerts = () => {
     fetch("http://localhost:3001/api/admin/emergency-alerts")
       .then((res) => res.json())
@@ -117,7 +111,6 @@ function AdminDashboard() {
       });
   };
 
-  // 撈待審計數
   const fetchPendingCounts = () => {
     fetch("http://localhost:3001/api/admin/pending-counts")
       .then((res) => res.json())
@@ -126,7 +119,6 @@ function AdminDashboard() {
       });
   };
 
-  // 撈一般簽到紀錄
   const fetchCheckinRecords = () => {
     fetch("http://localhost:3001/api/admin/checkin-records")
       .then((res) => res.json())
@@ -135,7 +127,6 @@ function AdminDashboard() {
       });
   };
 
-  // 撈補簽到申請
   const fetchMakeupCheckins = () => {
     fetch("http://localhost:3001/api/admin/makeup-checkins")
       .then((res) => res.json())
@@ -144,7 +135,6 @@ function AdminDashboard() {
       });
   };
 
-  // 撈課堂紀錄
   const fetchClassNotes = () => {
     fetch("http://localhost:3001/api/admin/class-notes")
       .then((res) => res.json())
@@ -153,7 +143,6 @@ function AdminDashboard() {
       });
   };
 
-  // 撈補填申請
   const fetchMakeupNotes = () => {
     fetch("http://localhost:3001/api/admin/makeup-notes")
       .then((res) => res.json())
@@ -174,7 +163,7 @@ function AdminDashboard() {
         .then((result) => {
           if (result.success) {
             if (activeTab === "tutors" || activeTab === "review-data")
-              setStudentsList(result.data); // ← 加上 review-data
+              setStudentsList(result.data);
             setPendingReviews(
               result.data.filter(
                 (s) =>
@@ -222,7 +211,6 @@ function AdminDashboard() {
     return () => clearInterval(interval);
   }, []);
 
-  // 切到簽到管理 tab 時，撈所有資料
   useEffect(() => {
     if (activeTab === "checkin-mgmt") {
       fetchCheckinRecords();
@@ -283,7 +271,6 @@ function AdminDashboard() {
     }
   };
 
-  // ── 審查補簽到 ──────────────────────────────────────────
   const handleMakeupCheckinReview = async (id, action) => {
     const msg = action === "approved" ? "核准此補簽到申請？" : "駁回此申請？";
     if (!window.confirm(`確認${msg}`)) return;
@@ -308,7 +295,6 @@ function AdminDashboard() {
     }
   };
 
-  // ── 審查補填紀錄 ────────────────────────────────────────
   const handleMakeupNotesReview = async (id, action) => {
     const msg = action === "approved" ? "核准此補填申請？" : "駁回此申請？";
     if (!window.confirm(`確認${msg}`)) return;
@@ -403,19 +389,15 @@ function AdminDashboard() {
   };
 
   const renderReviewData = () => {
-    const certSubTab = certActiveTab; // 用 state 控制子分頁
-
     return (
       <main className="flex-grow flex flex-col gap-4 animate-fade-in">
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-          {/* 標題 */}
           <div className="bg-slate-50 px-6 py-4 border-b border-slate-100 flex justify-between items-center">
             <h2 className="font-bold text-slate-700 flex items-center gap-2">
               <FileCheck size={18} className="text-purple-600" /> 審查資料
             </h2>
           </div>
 
-          {/* 子分頁 */}
           <div className="flex border-b border-slate-100">
             <button
               onClick={() => setCertActiveTab("cert")}
@@ -439,7 +421,6 @@ function AdminDashboard() {
             </button>
           </div>
 
-          {/* 資格證明內容 */}
           {certActiveTab === "cert" && (
             <div className="p-6">
               {studentsList.length === 0 ? (
@@ -452,7 +433,6 @@ function AdminDashboard() {
                 </div>
               ) : (
                 <div className="flex flex-col gap-4">
-                  {/* 待審區塊 */}
                   {pendingReviews.length > 0 && (
                     <div>
                       <h3 className="text-sm font-bold text-orange-600 flex items-center gap-2 mb-3">
@@ -481,7 +461,7 @@ function AdminDashboard() {
                                   <button
                                     onClick={() =>
                                       setPreviewFileUrl(
-                                        `http://localhost:3001/uploads/${student.certification_file}`,
+                                        `http://localhost:3001/api/preview/${student.certification_file}`,
                                       )
                                     }
                                     className="flex items-center text-xs font-bold text-blue-600 hover:text-blue-700 bg-blue-50 border border-blue-200 px-3 py-1.5 rounded-lg transition"
@@ -489,7 +469,7 @@ function AdminDashboard() {
                                     <Eye size={13} className="mr-1" /> 預覽
                                   </button>
                                   <a
-                                    href={`http://localhost:3001/uploads/${student.certification_file}`}
+                                    href={`http://localhost:3001/api/preview/${student.certification_file}`}
                                     target="_blank"
                                     rel="noopener noreferrer"
                                     download
@@ -516,7 +496,6 @@ function AdminDashboard() {
                     </div>
                   )}
 
-                  {/* 已審區塊 */}
                   {(() => {
                     const reviewed = studentsList.filter(
                       (s) =>
@@ -551,7 +530,7 @@ function AdminDashboard() {
                                     <button
                                       onClick={() =>
                                         setPreviewFileUrl(
-                                          `http://localhost:3001/uploads/${student.certification_file}`,
+                                          `http://localhost:3001/api/preview/${student.certification_file}`,
                                         )
                                       }
                                       className="flex items-center text-xs font-bold text-slate-500 hover:text-slate-700 bg-white border border-slate-200 px-3 py-1.5 rounded-lg transition"
@@ -559,7 +538,7 @@ function AdminDashboard() {
                                       <Eye size={13} className="mr-1" /> 預覽
                                     </button>
                                     <a
-                                      href={`http://localhost:3001/uploads/${student.certification_file}`}
+                                      href={`http://localhost:3001/api/preview/${student.certification_file}`}
                                       target="_blank"
                                       rel="noopener noreferrer"
                                       download
@@ -584,7 +563,6 @@ function AdminDashboard() {
                                     <XCircle size={13} /> 已退件
                                   </span>
                                 )}
-                                {/* 可重新審查 */}
                                 <button
                                   onClick={() =>
                                     setReviewModal({ isOpen: true, student })
@@ -601,7 +579,6 @@ function AdminDashboard() {
                     );
                   })()}
 
-                  {/* 尚未上傳 */}
                   {(() => {
                     const noFile = studentsList.filter(
                       (s) => !s.certification_file,
@@ -635,7 +612,6 @@ function AdminDashboard() {
             </div>
           )}
 
-          {/* 時數證明（佔位） */}
           {certActiveTab === "hours" && (
             <div className="py-16 text-center text-slate-400 font-medium">
               <Clock size={40} className="mx-auto mb-3 text-slate-200" />
@@ -678,7 +654,6 @@ function AdminDashboard() {
 
     return (
       <main className="flex-grow flex flex-col gap-4 animate-fade-in">
-        {/* Sub-tab 切換 */}
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
           <div className="flex border-b border-slate-100 overflow-x-auto">
             {subTabs.map((tab) => (
@@ -702,7 +677,6 @@ function AdminDashboard() {
             ))}
           </div>
 
-          {/* ── 一般簽到紀錄 ── */}
           {checkinSubTab === "checkin-records" && (
             <div className="p-0">
               {checkinRecords.length === 0 ? (
@@ -793,7 +767,6 @@ function AdminDashboard() {
             </div>
           )}
 
-          {/* ── 補簽到審查 ── */}
           {checkinSubTab === "makeup-checkins" && (
             <div className="p-0">
               {makeupCheckins.length === 0 ? (
@@ -823,11 +796,7 @@ function AdminDashboard() {
                       >
                         <div className="flex items-center gap-3">
                           <div
-                            className={`w-10 h-10 rounded-xl flex flex-col items-center justify-center flex-shrink-0 ${
-                              item.status === "pending"
-                                ? "bg-amber-100 text-amber-700"
-                                : "bg-slate-100 text-slate-500"
-                            }`}
+                            className={`w-10 h-10 rounded-xl flex flex-col items-center justify-center flex-shrink-0 ${item.status === "pending" ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-500"}`}
                           >
                             <span className="text-[9px] font-bold uppercase">
                               {displayDate.toLocaleDateString("en-US", {
@@ -902,7 +871,6 @@ function AdminDashboard() {
             </div>
           )}
 
-          {/* ── 課堂紀錄 ── */}
           {checkinSubTab === "class-notes" && (
             <div className="p-0">
               {classNotes.length === 0 ? (
@@ -983,7 +951,6 @@ function AdminDashboard() {
             </div>
           )}
 
-          {/* ── 補填紀錄審查 ── */}
           {checkinSubTab === "makeup-notes" && (
             <div className="p-0">
               {makeupNotes.length === 0 ? (
@@ -1005,19 +972,11 @@ function AdminDashboard() {
                     return (
                       <div
                         key={item.id}
-                        className={`grid grid-cols-1 md:grid-cols-[2fr_1.5fr_1fr_1fr_auto] px-6 py-4 items-center gap-3 transition ${
-                          item.status === "pending"
-                            ? "bg-amber-50/30 hover:bg-amber-50"
-                            : "hover:bg-slate-50"
-                        }`}
+                        className={`grid grid-cols-1 md:grid-cols-[2fr_1.5fr_1fr_1fr_auto] px-6 py-4 items-center gap-3 transition ${item.status === "pending" ? "bg-amber-50/30 hover:bg-amber-50" : "hover:bg-slate-50"}`}
                       >
                         <div className="flex items-center gap-3">
                           <div
-                            className={`w-10 h-10 rounded-xl flex flex-col items-center justify-center flex-shrink-0 ${
-                              item.status === "pending"
-                                ? "bg-amber-100 text-amber-700"
-                                : "bg-slate-100 text-slate-500"
-                            }`}
+                            className={`w-10 h-10 rounded-xl flex flex-col items-center justify-center flex-shrink-0 ${item.status === "pending" ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-500"}`}
                           >
                             <span className="text-[9px] font-bold uppercase">
                               {displayDate.toLocaleDateString("en-US", {
@@ -1178,7 +1137,6 @@ function AdminDashboard() {
   const renderHomeDashboard = () => (
     <>
       <main className="flex-grow flex flex-col gap-6">
-        {/* 緊急通報預覽 */}
         {unreadCount > 0 && (
           <div className="bg-white rounded-2xl shadow-sm border border-red-200 overflow-hidden">
             <div className="bg-red-50 px-6 py-4 border-b border-red-100 flex justify-between items-center">
@@ -1220,13 +1178,11 @@ function AdminDashboard() {
           </div>
         )}
 
-        {/* 補申請待審預覽 */}
         {pendingCounts.total > 0 && (
           <div className="bg-white rounded-2xl shadow-sm border border-amber-200 overflow-hidden">
             <div className="bg-amber-50 px-6 py-4 border-b border-amber-100 flex justify-between items-center">
               <h2 className="font-bold text-amber-700 flex items-center gap-2">
-                <Clock size={18} />
-                待審核申請（{pendingCounts.total} 件）
+                <Clock size={18} /> 待審核申請（{pendingCounts.total} 件）
               </h2>
               <button
                 onClick={() => setActiveTab("checkin-mgmt")}
@@ -1272,7 +1228,6 @@ function AdminDashboard() {
           </div>
         )}
 
-        {/* 資格證明待審 */}
         <div className="bg-white rounded-2xl shadow-sm border border-orange-100 overflow-hidden">
           <div className="bg-orange-50 px-6 py-4 border-b border-orange-100 flex justify-between items-center">
             <h2 className="font-bold text-orange-700 flex items-center">
@@ -1308,7 +1263,7 @@ function AdminDashboard() {
                       <button
                         onClick={() =>
                           window.open(
-                            `http://localhost:3001/uploads/${student.certification_file}`,
+                            `http://localhost:3001/api/preview/${student.certification_file}`,
                           )
                         }
                         className="flex items-center text-primary hover:underline font-bold bg-primary/5 px-2 py-1 rounded-md"
@@ -1336,7 +1291,6 @@ function AdminDashboard() {
           </div>
         </div>
 
-        {/* 已審資料 */}
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden mt-2">
           <div className="bg-slate-50 px-6 py-4 border-b border-slate-100">
             <h2 className="font-bold text-slate-700 flex items-center">
@@ -1659,6 +1613,108 @@ function AdminDashboard() {
     </main>
   );
 
+  // ── 介面：檔案管理 ──────────────────────────────────────
+  // ── 介面：檔案管理 ──────────────────────────────────────
+  const renderFiles = () => {
+    const files = [
+      {
+        name: "輔導時數證書.docx",
+        description: "輔導實習時數證明書範本（Certificate of Practicum Hours）",
+        path: "輔導時數證書.docx",
+      },
+    ];
+
+    return (
+      <main className="flex-grow flex flex-col gap-4 animate-fade-in">
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+          <div className="bg-slate-50 px-6 py-4 border-b border-slate-100 flex justify-between items-center">
+            <h2 className="font-bold text-slate-700 flex items-center gap-2">
+              <FolderOpen size={18} className="text-purple-600" /> 檔案管理
+            </h2>
+            <span className="text-xs text-slate-400 font-medium">
+              共 {files.length} 個檔案
+            </span>
+          </div>
+
+          <div className="p-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+            {files.map((file) => (
+              <div
+                key={file.name}
+                className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm hover:shadow-md hover:border-purple-200 transition-all flex flex-col gap-4"
+              >
+                {/* 檔案資訊 */}
+                <div className="flex items-start gap-3">
+                  <div className="w-12 h-12 bg-blue-50 border border-blue-100 rounded-xl flex items-center justify-center flex-shrink-0">
+                    <FileText size={22} className="text-blue-500" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="font-bold text-slate-800 text-sm leading-snug break-all">
+                      {file.name}
+                    </p>
+                    <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                      {file.description}
+                    </p>
+                  </div>
+                </div>
+
+                {/* ✨ 修改這裡：原本的灰色警告拿掉，直接呼叫後端預覽 API 顯示 PDF */}
+                <div className="bg-slate-50 rounded-xl border border-slate-100 h-48 overflow-hidden">
+                  <iframe
+                    src={`http://localhost:3001/api/preview/${file.path}`}
+                    className="w-full h-full border-0"
+                    title="文件預覽"
+                  />
+                </div>
+
+                {/* 操作按鈕 */}
+                <div className="flex gap-2 mt-auto">
+                  {/* ✨ 修改這裡：開新視窗指向 /api/preview/ 才能在瀏覽器打開 */}
+                  <a
+                    href={`http://localhost:3001/api/preview/${file.path}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 bg-slate-100 text-slate-700 text-xs font-bold rounded-lg border border-slate-200 hover:bg-slate-200 transition"
+                  >
+                    <Eye size={13} /> 開新視窗
+                  </a>
+
+                  {/* 下載按鈕維持指向 /uploads/，這樣下載下來的才會是真正的 docx 原始檔 */}
+                  <a
+                    href={`http://localhost:3001/uploads/${file.path}`}
+                    download={file.name}
+                    className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 bg-purple-600 text-white text-xs font-bold rounded-lg hover:bg-purple-700 transition shadow-sm"
+                  >
+                    <Download size={13} /> 下載
+                  </a>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* 說明提示 */}
+        <div className="bg-blue-50 border border-blue-200 rounded-xl px-5 py-4 text-sm text-blue-700 flex items-start gap-3">
+          <span className="text-lg flex-shrink-0 mt-0.5">💡</span>
+          <div className="text-xs leading-relaxed">
+            如需新增更多範本檔案，請將檔案放置於後端{" "}
+            <code className="bg-blue-100 px-1.5 py-0.5 rounded font-mono">
+              uploads/
+            </code>{" "}
+            資料夾，並在{" "}
+            <code className="bg-blue-100 px-1.5 py-0.5 rounded font-mono">
+              renderFiles
+            </code>{" "}
+            的{" "}
+            <code className="bg-blue-100 px-1.5 py-0.5 rounded font-mono">
+              files
+            </code>{" "}
+            陣列中加入對應項目。
+          </div>
+        </div>
+      </main>
+    );
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
       <header className="bg-white shadow-sm h-16 flex items-center justify-between px-6 sticky top-0 z-20">
@@ -1694,7 +1750,6 @@ function AdminDashboard() {
 
             {notifDropdownOpen && (
               <div className="absolute right-0 mt-3 w-96 bg-white rounded-2xl shadow-xl border border-slate-100 overflow-hidden z-50">
-                {/* 標題 */}
                 <div className="px-4 py-3 border-b border-slate-100 flex justify-between items-center bg-slate-50">
                   <span className="font-bold text-slate-700 text-sm flex items-center gap-2">
                     <Bell size={15} className="text-primary" /> 通知
@@ -1714,10 +1769,7 @@ function AdminDashboard() {
                     查看全部緊急通報 →
                   </button>
                 </div>
-
-                {/* 通知列表 */}
                 <div className="max-h-96 overflow-y-auto divide-y divide-slate-50">
-                  {/* 待審申請 */}
                   {pendingCounts.total > 0 && (
                     <div
                       onClick={() => {
@@ -1740,8 +1792,6 @@ function AdminDashboard() {
                       </div>
                     </div>
                   )}
-
-                  {/* 緊急通報（未讀） */}
                   {emergencyAlerts
                     .filter((a) => !a.is_read)
                     .slice(0, 5)
@@ -1773,8 +1823,6 @@ function AdminDashboard() {
                         </div>
                       </div>
                     ))}
-
-                  {/* 空狀態 */}
                   {unreadCount === 0 && pendingCounts.total === 0 && (
                     <div className="px-4 py-8 text-center text-slate-400 text-sm">
                       <Bell size={28} className="mx-auto mb-2 text-slate-200" />
@@ -1791,52 +1839,37 @@ function AdminDashboard() {
               className="flex items-center space-x-2 cursor-pointer hover:bg-slate-50 p-1 rounded-md transition"
               onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}
             >
-              <div className="w-9 h-9 bg-purple-100 text-purple-600 rounded-full flex items-center justify-center font-bold text-sm">
-                A
+              <div className="w-9 h-9 bg-purple-100 text-purple-600 rounded-full flex items-center justify-center">
+                <User size={18} />
               </div>
               <ChevronDown size={16} className="text-slate-400" />
             </div>
             {isProfileMenuOpen && (
-              <div className="relative">
-                <div
-                  className="flex items-center space-x-2 cursor-pointer hover:bg-slate-50 p-1 rounded-md transition"
-                  onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}
-                >
-                  <div className="w-9 h-9 bg-purple-100 text-purple-600 rounded-full flex items-center justify-center">
-                    <User size={18} />
-                  </div>
-                  <ChevronDown size={16} className="text-slate-400" />
+              <div className="absolute right-0 mt-2 w-56 bg-white rounded-xl shadow-lg border border-slate-100 overflow-hidden z-50">
+                <div className="px-4 py-3 border-b border-slate-100">
+                  <p className="font-bold text-slate-800">
+                    {userInfo.chineseName || userInfo.englishName || "管理員"}
+                  </p>
+                  <span className="text-[10px] bg-purple-100 text-purple-600 px-2 py-0.5 rounded-full font-bold mt-1 inline-block">
+                    Admin
+                  </span>
                 </div>
-                {isProfileMenuOpen && (
-                  <div className="absolute right-0 mt-2 w-56 bg-white rounded-xl shadow-lg border border-slate-100 overflow-hidden z-50">
-                    <div className="px-4 py-3 border-b border-slate-100">
-                      <p className="font-bold text-slate-800">
-                        {userInfo.chineseName ||
-                          userInfo.englishName ||
-                          "管理員"}
-                      </p>
-                      <span className="text-[10px] bg-purple-100 text-purple-600 px-2 py-0.5 rounded-full font-bold mt-1 inline-block">
-                        Admin
-                      </span>
-                    </div>
-                    <div className="py-2">
-                      <button
-                        onClick={() => alert("使用手冊說明內容即將上線！")}
-                        className="w-full flex items-center px-4 py-2 text-sm text-slate-600 hover:bg-slate-50 hover:text-primary transition"
-                      >
-                        <BookOpen size={16} className="mr-3" /> 使用手冊說明
-                      </button>
-                    </div>
-                    <div className="py-2 border-t border-slate-100">
-                      <button
-                        onClick={handleLogout}
-                        className="w-full flex items-center px-4 py-2 text-sm font-medium text-red-500 hover:bg-red-50 transition"
-                      >
-                        <LogOut size={16} className="mr-3" /> 登出
-                      </button>
-                    </div>
-                  </div>
-                )}
+                <div className="py-2">
+                  <button
+                    onClick={() => alert("使用手冊說明內容即將上線！")}
+                    className="w-full flex items-center px-4 py-2 text-sm text-slate-600 hover:bg-slate-50 hover:text-primary transition"
+                  >
+                    <BookOpen size={16} className="mr-3" /> 使用手冊說明
+                  </button>
+                </div>
+                <div className="py-2 border-t border-slate-100">
+                  <button
+                    onClick={handleLogout}
+                    className="w-full flex items-center px-4 py-2 text-sm font-medium text-red-500 hover:bg-red-50 transition"
+                  >
+                    <LogOut size={16} className="mr-3" /> 登出
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -1880,7 +1913,6 @@ function AdminDashboard() {
                 />{" "}
                 外籍生
               </li>
-              {/* ── 新增：簽到管理 ── */}
               <li
                 onClick={() => setActiveTab("checkin-mgmt")}
                 className={`flex items-center p-3 rounded-xl cursor-pointer transition ${activeTab === "checkin-mgmt" ? "bg-purple-50 text-purple-600 font-bold" : "hover:bg-slate-50"}`}
@@ -1957,6 +1989,17 @@ function AdminDashboard() {
                   </span>
                 )}
               </li>
+              {/* ── 新增：檔案管理 ── */}
+              <li
+                onClick={() => setActiveTab("files")}
+                className={`flex items-center p-3 rounded-xl cursor-pointer transition ${activeTab === "files" ? "bg-purple-50 text-purple-600 font-bold" : "hover:bg-slate-50"}`}
+              >
+                <FolderOpen
+                  size={20}
+                  className={`mr-4 ${activeTab === "files" ? "text-purple-600" : "text-slate-400"}`}
+                />
+                檔案
+              </li>
             </ul>
           </div>
         </aside>
@@ -1971,10 +2014,12 @@ function AdminDashboard() {
                 ? renderUnmatchRequests()
                 : activeTab === "review-data"
                   ? renderReviewData()
-                  : renderStudentDirectory()}
+                  : activeTab === "files"
+                    ? renderFiles()
+                    : renderStudentDirectory()}
       </div>
 
-      {/* 詳細內容 Modal（補簽到 / 補填 / 課堂紀錄） */}
+      {/* 詳細內容 Modal */}
       {detailModal.isOpen && detailModal.data && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
@@ -1996,7 +2041,6 @@ function AdminDashboard() {
               </button>
             </div>
             <div className="p-6 space-y-4 overflow-y-auto flex-grow">
-              {/* 共用欄位 */}
               <div className="grid grid-cols-2 gap-3">
                 <div className="bg-slate-50 p-3 rounded-xl">
                   <span className="text-xs font-bold text-slate-400 block mb-1">
@@ -2033,8 +2077,6 @@ function AdminDashboard() {
                   </span>
                 </div>
               </div>
-
-              {/* 補簽到：說明原因 */}
               {detailModal.type === "makeup-checkin" && (
                 <div>
                   <span className="text-xs font-bold text-slate-400 block mb-2">
@@ -2045,8 +2087,6 @@ function AdminDashboard() {
                   </div>
                 </div>
               )}
-
-              {/* 課堂紀錄 / 補填：地點＋內容＋備註 */}
               {(detailModal.type === "notes" ||
                 detailModal.type === "makeup-notes") && (
                 <>
@@ -2080,8 +2120,6 @@ function AdminDashboard() {
                   )}
                 </>
               )}
-
-              {/* 附件 */}
               {detailModal.data.attachment_file && (
                 <div>
                   <span className="text-xs font-bold text-slate-400 block mb-2">
@@ -2104,15 +2142,11 @@ function AdminDashboard() {
                   </div>
                 </div>
               )}
-
-              {/* 狀態 */}
               <div className="flex items-center gap-3 pt-2 border-t border-slate-100">
                 <span className="text-xs font-bold text-slate-400">狀態：</span>
                 {statusBadge(detailModal.data.status)}
               </div>
             </div>
-
-            {/* 審查按鈕（只有補申請 + pending 才顯示） */}
             {detailModal.data.status === "pending" &&
               detailModal.type !== "notes" && (
                 <div className="px-6 pb-6 flex gap-3 flex-shrink-0">
@@ -2268,7 +2302,7 @@ function AdminDashboard() {
                   alt="Preview"
                   className="max-w-full max-h-full object-contain rounded-lg shadow-sm"
                 />
-              ) : previewFileUrl.match(/\.(pdf)$/i) ? (
+              ) : previewFileUrl.match(/\.(pdf|docx|doc)$/i) ? (
                 <iframe
                   src={previewFileUrl}
                   className="w-full h-[70vh] border-0 rounded-lg shadow-sm"

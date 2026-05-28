@@ -7,6 +7,9 @@ const jwt = require("jsonwebtoken");
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
+const libre = require("libreoffice-convert");
+const util = require("util");
+const convertAsync = util.promisify(libre.convert);
 
 const app = express();
 app.use(cors());
@@ -33,6 +36,55 @@ const storage = multer.diskStorage({
 const upload = multer({ storage: storage });
 
 app.use("/uploads", express.static("uploads"));
+app.get("/api/preview/:filename", async (req, res) => {
+  const filename = req.params.filename;
+  const ext = path.extname(filename).toLowerCase();
+  const originalFilePath = path.join(__dirname, "uploads", filename);
+
+  // 確認原本的檔案存不存在
+  if (!fs.existsSync(originalFilePath)) {
+    return res.status(404).json({ success: false, message: "找不到檔案" });
+  }
+
+  // 🚀 如果是 Word 檔 (.docx 或 .doc)，執行轉檔邏輯
+  if (ext === ".docx" || ext === ".doc") {
+    // 設定轉換後的 PDF 檔名與路徑
+    const pdfFilename = filename.replace(ext, ".pdf");
+    const pdfFilePath = path.join(__dirname, "uploads", pdfFilename);
+
+    // 如果已經轉換過了，就直接回傳快取的 PDF，節省效能
+    if (fs.existsSync(pdfFilePath)) {
+      return res.sendFile(pdfFilePath);
+    }
+
+    // 尚未轉換過，開始執行轉換
+    try {
+      console.log(`🔄 正在將 ${filename} 轉換為 PDF...`);
+      const docxBuf = fs.readFileSync(originalFilePath);
+
+      // 執行轉換 (轉換為 .pdf)
+      const pdfBuf = await convertAsync(docxBuf, ".pdf", undefined);
+
+      // 將轉換好的 PDF 寫入 uploads 資料夾
+      fs.writeFileSync(pdfFilePath, pdfBuf);
+      console.log(`✅ 轉換成功！已建立 ${pdfFilename}`);
+
+      // 回傳 PDF 給前端預覽
+      return res.sendFile(pdfFilePath);
+    } catch (err) {
+      console.error("❌ 轉換 PDF 失敗:", err);
+      return res
+        .status(500)
+        .json({
+          success: false,
+          message: "檔案轉換失敗，請確認伺服器是否已安裝 LibreOffice",
+        });
+    }
+  }
+
+  // 🚀 如果是其他檔案（圖片、PDF等），直接回傳原檔
+  res.sendFile(originalFilePath);
+});
 
 const JWT_SECRET = process.env.JWT_SECRET || "csl_super_secret_key_2026";
 
