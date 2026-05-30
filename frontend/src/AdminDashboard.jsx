@@ -30,6 +30,8 @@ import {
   AlertCircle,
   Award,
   FolderOpen,
+  Calendar,
+  Plus,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import logoImg from "./assets/csl-Logo.png";
@@ -78,6 +80,37 @@ function AdminDashboard() {
     type: "",
   });
   const [certActiveTab, setCertActiveTab] = useState("cert");
+  const [certApps, setCertApps] = useState([]);
+  const fetchCertApps = () => {
+    fetch("http://localhost:3001/api/admin/certificate-applications")
+      .then((res) => res.json())
+      .then((result) => {
+        if (result.success) setCertApps(result.data);
+      });
+  };
+
+  const handleCertReview = async (id, action) => {
+    const msg =
+      action === "issued"
+        ? "確定要核發這張證書給該學生嗎？"
+        : "確定要駁回此申請？";
+    if (!window.confirm(msg)) return;
+    try {
+      const res = await fetch(
+        `http://localhost:3001/api/admin/certificate-applications/${id}/review`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action }),
+        },
+      );
+      const data = await res.json();
+      alert(data.message);
+      if (data.success) fetchCertApps(); // 成功後重新撈取列表
+    } catch {
+      alert("連線錯誤");
+    }
+  };
 
   const [notifDropdownOpen, setNotifDropdownOpen] = useState(false);
 
@@ -88,6 +121,12 @@ function AdminDashboard() {
   });
 
   const [unmatchRequests, setUnmatchRequests] = useState([]);
+  const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
+  // 管理員手動新增時數
+  const [addHoursModal, setAddHoursModal] = useState(false);
+  const [addHoursSlots, setAddHoursSlots] = useState([
+    { date: "", startTime: "", endTime: "" },
+  ]);
 
   useEffect(() => {
     const account = localStorage.getItem("loggedInAccount");
@@ -219,6 +258,9 @@ function AdminDashboard() {
       fetchMakeupNotes();
       fetchUnmatchRequests();
     }
+    if (activeTab === "cert-apps") {
+      fetchCertApps();
+    }
   }, [activeTab]);
 
   useEffect(() => {
@@ -337,6 +379,77 @@ function AdminDashboard() {
       const data = await res.json();
       alert(data.message);
       if (data.success) fetchUnmatchRequests();
+    } catch {
+      alert("連線錯誤");
+    }
+  };
+
+  // ─── 手動新增時數相關函式 ───
+  const handleAddHoursSlotChange = (index, field, value) => {
+    const newSlots = [...addHoursSlots];
+    newSlots[index][field] = value;
+    setAddHoursSlots(newSlots);
+  };
+
+  const handleAddNewHoursSlot = () => {
+    // 貼心設計：自動複製最後一筆的時間，讓管理員只需改日期
+    const lastSlot = addHoursSlots[addHoursSlots.length - 1];
+    setAddHoursSlots([
+      ...addHoursSlots,
+      {
+        date: "",
+        startTime: lastSlot?.startTime || "",
+        endTime: lastSlot?.endTime || "",
+      },
+    ]);
+  };
+
+  const handleRemoveHoursSlot = (index) => {
+    setAddHoursSlots(addHoursSlots.filter((_, i) => i !== index));
+  };
+
+  // 試算本次新增的總時數
+  const calculateTotalNewHours = () => {
+    let total = 0;
+    addHoursSlots.forEach((s) => {
+      if (s.startTime && s.endTime) {
+        const diff =
+          (new Date(`1970-01-01T${s.endTime}`) -
+            new Date(`1970-01-01T${s.startTime}`)) /
+          3600000;
+        if (diff > 0) total += diff;
+      }
+    });
+    return total.toFixed(1);
+  };
+
+  const handleAddHoursSubmit = async (e) => {
+    e.preventDefault();
+    // 檢查是否每一筆都有填寫完整
+    for (const s of addHoursSlots) {
+      if (!s.date || !s.startTime || !s.endTime) {
+        return alert("請確認所有欄位都已填寫完整！");
+      }
+      if (s.startTime >= s.endTime) {
+        return alert("時間設定有誤：結束時間必須晚於開始時間！");
+      }
+    }
+
+    try {
+      const res = await fetch("http://localhost:3001/api/admin/add-hours", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          account: selectedStudent.account,
+          slots: addHoursSlots, // 🌟 傳送整個陣列
+        }),
+      });
+      const data = await res.json();
+      alert(data.message);
+      if (data.success) {
+        setAddHoursModal(false);
+        setAddHoursSlots([{ date: "", startTime: "", endTime: "" }]);
+      }
     } catch {
       alert("連線錯誤");
     }
@@ -1365,6 +1478,15 @@ function AdminDashboard() {
                   {activeTab === "tutors" ? "小老師 Tutor" : "外籍生 Tutee"}
                 </span>
               </div>
+              {/* 👇 新增這顆按鈕，只有在看小老師時才顯示 */}
+              {activeTab === "tutors" && (
+                <button
+                  onClick={() => setAddHoursModal(true)}
+                  className="flex items-center gap-2 px-4 py-2 bg-primary text-white text-sm font-bold rounded-xl hover:bg-primary-dark transition shadow-sm"
+                >
+                  <Plus size={16} /> 新增輔導時數
+                </button>
+              )}
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {Object.entries(selectedStudent).map(([key, value]) => {
@@ -1613,7 +1735,99 @@ function AdminDashboard() {
     </main>
   );
 
-  // ── 介面：檔案管理 ──────────────────────────────────────
+  // 新增這個渲染證書申請列表的畫面
+  const renderCertApps = () => (
+    <main className="flex-grow flex flex-col gap-4 animate-fade-in">
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+        <div className="bg-slate-50 px-6 py-4 border-b border-slate-100 flex justify-between items-center">
+          <h2 className="font-bold text-slate-700 flex items-center gap-2">
+            <Award size={18} className="text-purple-600" /> 證書申請審查
+          </h2>
+          <button
+            onClick={fetchCertApps}
+            className="text-xs text-slate-500 hover:text-primary font-bold px-3 py-1.5 bg-white rounded-lg border border-slate-200 transition"
+          >
+            重新整理
+          </button>
+        </div>
+        <div className="p-0">
+          {certApps.length === 0 ? (
+            <div className="py-16 text-center text-slate-400 font-medium">
+              目前沒有證書申請
+            </div>
+          ) : (
+            <div className="divide-y divide-slate-100">
+              <div className="hidden md:grid grid-cols-[1.5fr_1fr_1.5fr_1fr_auto] px-6 py-3 bg-slate-50 text-xs font-bold text-slate-400 uppercase tracking-wider">
+                <span>申請者</span>
+                <span>已核准時數</span>
+                <span>申請時間</span>
+                <span>狀態</span>
+                <span>操作</span>
+              </div>
+              {certApps.map((item) => (
+                <div
+                  key={item.id}
+                  className={`grid grid-cols-1 md:grid-cols-[1.5fr_1fr_1.5fr_1fr_auto] px-6 py-4 items-center gap-3 transition ${item.status === "pending" ? "bg-amber-50/30 hover:bg-amber-50" : "hover:bg-slate-50"}`}
+                >
+                  <div>
+                    <p className="font-bold text-slate-700 text-sm">
+                      {item.chinese_name || item.english_name}
+                    </p>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      {item.student_id}
+                    </p>
+                  </div>
+                  <div className="text-sm font-black text-slate-700">
+                    {parseFloat(item.approved_hours).toFixed(1)}{" "}
+                    <span className="text-xs font-bold text-slate-400">hr</span>
+                  </div>
+                  <div className="text-xs text-slate-400 font-medium">
+                    {formatDateTime(item.created_at)}
+                  </div>
+                  <div>
+                    {item.status === "pending" && (
+                      <span className="px-2.5 py-1 bg-amber-100 text-amber-700 text-xs font-bold rounded-full">
+                        待審核
+                      </span>
+                    )}
+                    {item.status === "issued" && (
+                      <span className="px-2.5 py-1 bg-green-100 text-green-700 text-xs font-bold rounded-full">
+                        已核發
+                      </span>
+                    )}
+                    {item.status === "rejected" && (
+                      <span className="px-2.5 py-1 bg-red-100 text-red-700 text-xs font-bold rounded-full">
+                        已駁回
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex gap-2">
+                    {item.status === "pending" && (
+                      <>
+                        <button
+                          onClick={() => handleCertReview(item.id, "issued")}
+                          className="px-3 py-1.5 bg-green-500 text-white text-xs font-bold rounded-lg hover:bg-green-600 transition shadow-sm"
+                        >
+                          核發證書
+                        </button>
+                        <button
+                          onClick={() => handleCertReview(item.id, "rejected")}
+                          className="px-3 py-1.5 bg-red-100 text-red-600 text-xs font-bold rounded-lg hover:bg-red-200 transition"
+                        >
+                          駁回
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </main>
+  );
+
   // ── 介面：檔案管理 ──────────────────────────────────────
   const renderFiles = () => {
     const files = [
@@ -1989,6 +2203,23 @@ function AdminDashboard() {
                   </span>
                 )}
               </li>
+              {/* 審查資料下方加入這段 */}
+              <li
+                onClick={() => setActiveTab("cert-apps")}
+                className={`flex items-center p-3 rounded-xl cursor-pointer transition ${activeTab === "cert-apps" ? "bg-purple-50 text-purple-600 font-bold" : "hover:bg-slate-50"}`}
+              >
+                <Award
+                  size={20}
+                  className={`mr-4 ${activeTab === "cert-apps" ? "text-purple-600" : "text-slate-400"}`}
+                />
+                證書申請
+                {/* 顯示紅色的未處理數字提示 */}
+                {certApps.filter((a) => a.status === "pending").length > 0 && (
+                  <span className="ml-auto text-[10px] bg-red-500 text-white font-bold px-1.5 py-0.5 rounded-full">
+                    {certApps.filter((a) => a.status === "pending").length}
+                  </span>
+                )}
+              </li>
               {/* ── 新增：檔案管理 ── */}
               <li
                 onClick={() => setActiveTab("files")}
@@ -2016,7 +2247,9 @@ function AdminDashboard() {
                   ? renderReviewData()
                   : activeTab === "files"
                     ? renderFiles()
-                    : renderStudentDirectory()}
+                    : activeTab === "cert-apps" // 👈 加上這行
+                      ? renderCertApps() // 👈 加上這行
+                      : renderStudentDirectory()}
       </div>
 
       {/* 詳細內容 Modal */}
@@ -2361,6 +2594,154 @@ function AdminDashboard() {
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* 新增輔導時數 Modal */}
+      {addHoursModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-fade-in">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="flex justify-between items-center px-6 py-4 border-b border-slate-100 bg-slate-50 flex-shrink-0">
+              <h3 className="font-bold text-lg text-slate-800 flex items-center">
+                <Clock className="mr-2 text-primary" size={20} /> 手動新增時數
+              </h3>
+              <button
+                onClick={() => {
+                  setAddHoursModal(false);
+                  setAddHoursSlots([{ date: "", startTime: "", endTime: "" }]);
+                }}
+                className="text-slate-400 hover:text-red-500 transition"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <form
+              onSubmit={handleAddHoursSubmit}
+              className="p-6 overflow-y-auto flex-grow"
+            >
+              <p className="text-sm text-slate-500 mb-4">
+                為 <b>{selectedStudent?.chinese_name}</b> 新增已核准的輔導紀錄：
+              </p>
+
+              <div className="space-y-4">
+                {addHoursSlots.map((slot, index) => (
+                  <div
+                    key={index}
+                    className="bg-slate-50 p-4 rounded-xl border border-slate-200 relative group"
+                  >
+                    {/* 刪除按鈕 (大於一筆時才顯示) */}
+                    {addHoursSlots.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveHoursSlot(index)}
+                        className="absolute top-2 right-2 text-slate-300 hover:text-red-500 p-1"
+                      >
+                        <X size={16} />
+                      </button>
+                    )}
+
+                    <div className="mb-3">
+                      <label className="block text-xs font-bold text-slate-500 mb-1">
+                        日期 Date
+                      </label>
+                      <input
+                        type="date"
+                        value={slot.date}
+                        onChange={(e) =>
+                          handleAddHoursSlotChange(
+                            index,
+                            "date",
+                            e.target.value,
+                          )
+                        }
+                        required
+                        className="w-full border border-slate-300 rounded-lg px-3 py-2 outline-none focus:border-primary text-sm"
+                      />
+                    </div>
+                    <div className="flex gap-4">
+                      <div className="flex-1">
+                        <label className="block text-xs font-bold text-slate-500 mb-1">
+                          開始時間 Start
+                        </label>
+                        <input
+                          type="time"
+                          value={slot.startTime}
+                          onChange={(e) =>
+                            handleAddHoursSlotChange(
+                              index,
+                              "startTime",
+                              e.target.value,
+                            )
+                          }
+                          required
+                          className="w-full border border-slate-300 rounded-lg px-3 py-2 outline-none focus:border-primary text-sm"
+                        />
+                      </div>
+                      <div className="flex-1">
+                        <label className="block text-xs font-bold text-slate-500 mb-1">
+                          結束時間 End
+                        </label>
+                        <input
+                          type="time"
+                          value={slot.endTime}
+                          onChange={(e) =>
+                            handleAddHoursSlotChange(
+                              index,
+                              "endTime",
+                              e.target.value,
+                            )
+                          }
+                          required
+                          className="w-full border border-slate-300 rounded-lg px-3 py-2 outline-none focus:border-primary text-sm"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* 新增列按鈕 */}
+              <button
+                type="button"
+                onClick={handleAddNewHoursSlot}
+                className="mt-4 flex items-center justify-center gap-1 w-full py-2.5 rounded-xl border border-dashed border-primary/30 text-primary text-sm font-bold bg-primary/5 hover:bg-primary/10 transition"
+              >
+                <Plus size={16} /> 新增一筆
+              </button>
+
+              <div className="mt-8 flex items-center justify-between">
+                <span className="text-sm font-bold text-slate-500">
+                  本次預計新增：
+                  <span className="text-lg text-green-600 ml-1">
+                    {calculateTotalNewHours()}
+                  </span>{" "}
+                  小時
+                </span>
+              </div>
+
+              <div className="mt-4 flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAddHoursModal(false);
+                    setAddHoursSlots([
+                      { date: "", startTime: "", endTime: "" },
+                    ]);
+                  }}
+                  className="flex-1 py-2.5 bg-slate-100 text-slate-600 font-bold rounded-xl hover:bg-slate-200 transition"
+                >
+                  取消
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-2.5 bg-primary text-white font-bold rounded-xl hover:bg-primary-dark transition shadow-sm"
+                >
+                  確認新增
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

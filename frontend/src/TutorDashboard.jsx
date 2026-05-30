@@ -24,6 +24,7 @@ import {
   Flag,
   ChevronRight,
   BookOpen,
+  Download,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import logoImg from "./assets/csl-Logo.png";
@@ -794,6 +795,36 @@ function TutorDashboard() {
       if (data.success) fetchCertStatus(userInfo.user_id);
     } catch {
       alert("連線錯誤");
+    }
+  };
+
+  const handleDownloadCert = async () => {
+    try {
+      const res = await fetch("http://localhost:3001/api/generate-cert-pdf", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: userInfo.user_id,
+        }),
+      });
+
+      if (!res.ok) throw new Error("下載失敗");
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.setAttribute(
+        "download",
+        `${userInfo.chineseName || userInfo.englishName}_輔導時數證書.pdf`,
+      );
+      document.body.appendChild(link);
+      link.click();
+
+      link.parentNode.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      alert("下載發生錯誤，請確認後端伺服器狀態！");
     }
   };
 
@@ -1951,15 +1982,12 @@ function TutorDashboard() {
     const certButton = () => {
       if (certStatus === "issued")
         return (
-          <div className="flex items-center gap-2 px-6 py-3 bg-green-100 text-green-700 font-bold rounded-xl border border-green-200">
-            <CheckCircle size={18} /> 證書已核發，請聯絡助教領取
-          </div>
-        );
-      if (certStatus === "pending")
-        return (
-          <div className="flex items-center gap-2 px-6 py-3 bg-amber-100 text-amber-700 font-bold rounded-xl border border-amber-200">
-            <Clock size={18} /> 申請審核中，請靜候通知
-          </div>
+          <button
+            onClick={handleDownloadCert}
+            className="flex items-center gap-2 px-6 py-3 bg-green-500 text-white font-bold rounded-xl hover:bg-green-600 transition shadow-md"
+          >
+            <Download size={18} /> 下載實習時數證明 (PDF)
+          </button>
         );
       return (
         <button

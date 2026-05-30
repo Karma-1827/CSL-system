@@ -10,6 +10,8 @@ const fs = require("fs");
 const libre = require("libreoffice-convert");
 const util = require("util");
 const convertAsync = util.promisify(libre.convert);
+const PizZip = require("pizzip");
+const Docxtemplater = require("docxtemplater");
 
 const app = express();
 app.use(cors());
@@ -36,8 +38,15 @@ const storage = multer.diskStorage({
 const upload = multer({ storage: storage });
 
 app.use("/uploads", express.static("uploads"));
+
+const JWT_SECRET = process.env.JWT_SECRET || "csl_super_secret_key_2026";
+
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+});
+
 app.get("/api/preview/:filename", async (req, res) => {
-  const filename = req.params.filename;
+  const filename = decodeURIComponent(req.params.filename);
   const ext = path.extname(filename).toLowerCase();
   const originalFilePath = path.join(__dirname, "uploads", filename);
 
@@ -62,8 +71,8 @@ app.get("/api/preview/:filename", async (req, res) => {
       console.log(`🔄 正在將 ${filename} 轉換為 PDF...`);
       const docxBuf = fs.readFileSync(originalFilePath);
 
-      // 執行轉換 (轉換為 .pdf)
-      const pdfBuf = await convertAsync(docxBuf, ".pdf", undefined);
+      // 執行轉換 (轉換為 .pdf)，將第三個參數改為 null
+      const pdfBuf = await convertAsync(docxBuf, ".pdf", null);
 
       // 將轉換好的 PDF 寫入 uploads 資料夾
       fs.writeFileSync(pdfFilePath, pdfBuf);
@@ -73,12 +82,10 @@ app.get("/api/preview/:filename", async (req, res) => {
       return res.sendFile(pdfFilePath);
     } catch (err) {
       console.error("❌ 轉換 PDF 失敗:", err);
-      return res
-        .status(500)
-        .json({
-          success: false,
-          message: "檔案轉換失敗，請確認伺服器是否已安裝 LibreOffice",
-        });
+      return res.status(500).json({
+        success: false,
+        message: "檔案轉換失敗，請確認伺服器是否已安裝 LibreOffice",
+      });
     }
   }
 
@@ -86,10 +93,320 @@ app.get("/api/preview/:filename", async (req, res) => {
   res.sendFile(originalFilePath);
 });
 
-const JWT_SECRET = process.env.JWT_SECRET || "csl_super_secret_key_2026";
+// 🚀 產生並下載動態 PDF 證書 (POST)
+const { PDFDocument, StandardFonts, rgb } = require("pdf-lib");
+const fontkit = require("@pdf-lib/fontkit");
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
+app.post("/api/generate-cert-pdf", async (req, res) => {
+  const { userId } = req.body;
+
+  if (!userId) {
+    return res.status(400).json({ success: false, message: "缺少 userId" });
+  }
+
+  try {
+    // 1. 撈取資料
+    const userRes = await pool.query(
+      "SELECT chinese_name, student_id FROM users WHERE id = $1",
+      [userId],
+    );
+    const classesRes = await pool.query(
+      `SELECT c.class_date::text as date, EXTRACT(EPOCH FROM (TO_TIMESTAMP(c.end_time::text, 'HH24:MI:SS') - TO_TIMESTAMP(c.start_time::text, 'HH24:MI:SS'))) / 3600.0 AS hours
+       FROM hours_review hr JOIN classes c ON hr.class_id = c.id
+       WHERE hr.tutor_id = $1 AND hr.status = 'approved' ORDER BY c.class_date ASC`,
+      [userId],
+    );
+
+    const user = userRes.rows[0];
+    if (!user) {
+      return res.status(404).json({ success: false, message: "找不到使用者" });
+    }
+
+    const totalHours = classesRes.rows
+      .reduce((sum, cls) => sum + parseFloat(cls.hours), 0)
+      .toFixed(1);
+
+    // 2. 讀取 template.pdf
+    const templatePath = path.join(__dirname, "uploads", "template.pdf");
+    const existingPdfBytes = fs.readFileSync(templatePath);
+    const pdfDoc = await PDFDocument.load(existingPdfBytes);
+    const templatePdfDoc = await PDFDocument.load(existingPdfBytes);
+
+    // 3. 載入中文字體 (請把 kaiu.ttf 放在 uploads 資料夾內)
+    const fontBytes = fs.readFileSync(
+      path.join(__dirname, "uploads", "kaiu.ttf"),
+    );
+    pdfDoc.registerFontkit(fontkit);
+    const pages = pdfDoc.getPages();
+    const firstPage = pages[0];
+
+    // 1. 定義字體與「智慧斷行與拼接」的繪製函數
+    const customFont = await pdfDoc.embedFont(fontBytes);
+    const timesFont = await pdfDoc.embedFont(StandardFonts.TimesRoman);
+    const darkBlue = rgb(0.1, 0.1, 0.4);
+    const tableStartX = 70;
+    const tableEndX = 500;
+    const dateColumn = { x: 45, width: 150 };
+    const hoursColumn = { x: 400, width: 110 };
+    const continuedHeaderY = 570;
+    const footerDateX = 70;
+    const footerDateY = 65;
+    const footerDateSize = 18;
+
+    const drawCenteredText = (page, text, column, y, size, font, color) => {
+      const textWidth = font.widthOfTextAtSize(text, size);
+      page.drawText(text, {
+        x: column.x + (column.width - textWidth) / 2,
+        y,
+        size,
+        font,
+        color,
+      });
+    };
+
+    const drawTableHeader = (page, y) => {
+      drawCenteredText(
+        page,
+        "輔導日期",
+        dateColumn,
+        y,
+        15,
+        customFont,
+        rgb(0, 0, 0),
+      );
+      drawCenteredText(
+        page,
+        "輔導時數",
+        hoursColumn,
+        y,
+        15,
+        customFont,
+        rgb(0, 0, 0),
+      );
+      page.drawLine({
+        start: { x: tableStartX, y: y - 5 },
+        end: { x: tableEndX, y: y - 5 },
+        thickness: 2.25,
+        color: rgb(0, 0, 0),
+      });
+    };
+
+    const drawSmartText = (page, parts, x, y, maxWidth, size) => {
+      let currentX = x;
+      let currentY = y;
+
+      for (const part of parts) {
+        const words = part.text.split(""); // 逐字處理，確保中文斷行精準
+        for (const char of words) {
+          const textSize = part.size || size;
+          const charWidth = part.font.widthOfTextAtSize(char, textSize);
+          // 檢查是否超出邊界 (maxWidth = 450)
+          if (currentX + charWidth > x + maxWidth) {
+            currentX = x; // 回到左邊界
+            currentY -= 25; // 往下移一行
+          }
+          // --- 強化粗體邏輯 ---
+          if (part.bold) {
+            // 向左偏移一點點
+            page.drawText(char, {
+              x: currentX - 0.5,
+              y: currentY,
+              size: textSize,
+              font: part.font,
+              color: part.color,
+            });
+            // 向右偏移一點點
+            page.drawText(char, {
+              x: currentX + 0.5,
+              y: currentY,
+              size: textSize,
+              font: part.font,
+              color: part.color,
+            });
+            // 原位再畫一次確保填滿
+            page.drawText(char, {
+              x: currentX,
+              y: currentY,
+              size: textSize,
+              font: part.font,
+              color: part.color,
+            });
+          }
+
+          page.drawText(char, {
+            x: currentX,
+            y: currentY,
+            size: textSize,
+            font: part.font,
+            color: part.color || rgb(0, 0, 0),
+          });
+          currentX += charWidth;
+        }
+      }
+      return currentY; // 回傳最後結束的 Y 座標
+    };
+
+    // 2. 定義內容段落
+    const section1Parts = [
+      {
+        text: `茲證明 ${user.chinese_name} 同學（學號：`,
+        font: customFont,
+        size: 16,
+        color: darkBlue,
+        bold: true,
+      },
+      {
+        text: `${user.student_id}`,
+        font: timesFont,
+        size: 16,
+        color: darkBlue,
+        bold: true,
+      },
+      { text: `）`, font: customFont, size: 16, color: darkBlue, bold: true },
+    ];
+
+    const section2Parts = [
+      {
+        text: "於本系擔任外籍生華語輔導小老師期間，積極輔導外籍學生學習華語，認真履行輔導職責，已完成輔導實習時數共",
+        font: customFont,
+        size: 14,
+        color: darkBlue,
+      },
+      { text: `${totalHours}`, font: timesFont, size: 14, color: darkBlue },
+      { text: "小時，特此證明。", font: customFont, size: 14, color: darkBlue },
+    ];
+
+    // 3. 執行繪製 (會自動計算斷行後的 Y 座標)
+    let currentY = 570;
+    drawSmartText(firstPage, section1Parts, 70, currentY, 440, 16);
+
+    currentY -= 30; // 段落間距
+    currentY = drawSmartText(firstPage, section2Parts, 70, currentY, 440, 14);
+
+    // 4. 繪製表頭 (使用計算後的 currentY 往下推)
+    const headerY = currentY - 33;
+    drawTableHeader(firstPage, headerY);
+
+    // 5. 繪製表格內容 (循環 + 自動換頁 + 重置)
+    // 1. 確保繪製時明確指定頁面
+    let currentPage = firstPage;
+    let yPos = headerY - 30; // 你的表格起始位置
+
+    const addContinuedPage = async (drawHeader = true) => {
+      const [copiedPage] = await pdfDoc.copyPages(templatePdfDoc, [0]);
+      currentPage = pdfDoc.addPage(copiedPage);
+      yPos = continuedHeaderY - 30;
+
+      if (drawHeader) {
+        drawTableHeader(currentPage, continuedHeaderY);
+      }
+    };
+
+    for (const cls of classesRes.rows) {
+      // 檢查是否超出邊界
+      if (yPos < 100) {
+        await addContinuedPage();
+      }
+
+      // [關鍵] 確保這裡使用的是 currentPage，而不是寫死的 firstPage
+      drawCenteredText(
+        currentPage,
+        cls.date,
+        dateColumn,
+        yPos,
+        14,
+        timesFont,
+        rgb(0, 0, 0),
+      );
+      drawCenteredText(
+        currentPage,
+        `${parseFloat(cls.hours).toFixed(1)}`,
+        hoursColumn,
+        yPos,
+        14,
+        timesFont,
+        rgb(0, 0, 0),
+      );
+      yPos -= 28;
+    }
+
+    // 6. 繪製總計
+    if (yPos < 180) {
+      await addContinuedPage(false);
+    }
+
+    const totalY = yPos;
+    currentPage.drawLine({
+      start: { x: tableStartX, y: totalY + 20 },
+      end: { x: tableEndX, y: totalY + 20 },
+      thickness: 2.25,
+      color: rgb(0, 0, 0),
+    });
+    currentPage.drawText("總時數", {
+      x:
+        dateColumn.x +
+        (dateColumn.width - customFont.widthOfTextAtSize("總時數", 14)) / 2,
+      y: totalY,
+      size: 14,
+      font: customFont,
+    });
+    drawCenteredText(
+      currentPage,
+      `${totalHours}`,
+      hoursColumn,
+      totalY,
+      14,
+      timesFont,
+      rgb(0, 0, 0),
+    );
+
+    // 繪製底部日期
+    const now = new Date();
+    drawSmartText(
+      currentPage,
+      [
+        {
+          text: "中華民國 ",
+          font: customFont,
+          size: footerDateSize,
+          bold: true,
+        },
+        {
+          text: `${now.getFullYear() - 1911}`,
+          font: timesFont,
+          size: footerDateSize,
+          bold: true,
+        },
+        { text: " 年 ", font: customFont, size: footerDateSize, bold: true },
+        {
+          text: `${now.getMonth() + 1}`,
+          font: timesFont,
+          size: footerDateSize,
+          bold: true,
+        },
+        { text: " 月 ", font: customFont, size: footerDateSize, bold: true },
+        {
+          text: `${now.getDate()}`,
+          font: timesFont,
+          size: footerDateSize,
+          bold: true,
+        },
+        { text: " 日", font: customFont, size: footerDateSize, bold: true },
+      ],
+      footerDateX,
+      footerDateY,
+      240,
+      footerDateSize,
+    );
+
+    // 5. 輸出
+    const pdfBytes = await pdfDoc.save();
+    res.setHeader("Content-Type", "application/pdf");
+    res.send(Buffer.from(pdfBytes));
+  } catch (error) {
+    console.error("PDF 產生失敗:", error);
+    res.status(500).json({ success: false, message: "PDF 產生失敗" });
+  }
 });
 
 // ✅ 工具函式：統一把 class_date 轉成純字串 "YYYY-MM-DD"
@@ -235,8 +552,8 @@ app.post("/api/tutee-profile", async (req, res) => {
       `INSERT INTO tutee_profiles 
       (user_id, enrollment_status, nationality, department, program, phone, 
        overall_level, level_listening, level_speaking, level_reading, level_writing, 
-       target_skills, skills_to_improve, available_times, learning_duration) 
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+       target_skills, skills_to_improve, available_times, learning_duration, gender) 
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
       [
         userId,
         studentType,
@@ -400,7 +717,7 @@ app.get("/api/admin/users/:role", async (req, res) => {
     const { role } = req.params;
     let query = "";
     if (role === "tutor") {
-      query = `SELECT u.account, u.chinese_name, u.english_name, u.student_id, u.email,
+      query = `SELECT u.id, u.account, u.chinese_name, u.english_name, u.student_id, u.email,
                t.department, t.phone, t.nationality, t.student_status, t.program, 
                t.level_listening, t.level_speaking, t.level_reading, t.level_writing, 
                t.teaching_notes, t.certification_file, t.certification_status
@@ -408,7 +725,7 @@ app.get("/api/admin/users/:role", async (req, res) => {
                LEFT JOIN tutor_profiles t ON u.id = t.user_id 
                WHERE u.role = 'tutor'`;
     } else if (role === "tutee") {
-      query = `SELECT u.account, u.chinese_name, u.english_name, u.student_id, u.email,
+      query = `SELECT u.id, u.account, u.chinese_name, u.english_name, u.student_id, u.email,
                p.department, p.phone, p.nationality, p.overall_level, 
                p.target_skills, p.skills_to_improve
                FROM users u 
@@ -759,7 +1076,9 @@ app.get("/api/classes/:userId", async (req, res) => {
         CASE WHEN cn.id IS NOT NULL THEN true ELSE false END AS has_note
       FROM classes c
       LEFT JOIN class_notes cn ON cn.class_id = c.id AND cn.user_id = $1
-      WHERE (c.tutor_id = $1 OR c.tutee_id = $1) AND c.status != 'cancelled'
+      WHERE (c.tutor_id = $1 OR c.tutee_id = $1)
+        AND c.status != 'cancelled'
+        AND c.tutee_id IS NOT NULL
       ORDER BY c.class_date ASC, c.start_time ASC
     `,
       [userId],
@@ -2271,6 +2590,62 @@ app.get("/api/tutee/classes-history/:userId", async (req, res) => {
     res.json({ success: true, data: result.rows });
   } catch (error) {
     console.error("查詢外籍生上課紀錄失敗:", error);
+    res.status(500).json({ success: false, message: "伺服器發生錯誤" });
+  }
+});
+
+// 🚀 管理員：手動幫學生新增輔導時數 (POST)
+// 🚀 管理員：手動幫學生新增輔導時數 (POST) - 支援多筆與防呆查詢
+app.post("/api/admin/add-hours", async (req, res) => {
+  // 🌟 改為接收 account 與 slots(陣列)
+  const { account, slots } = req.body;
+
+  try {
+    // 🌟 先用 account 去資料庫查出真實的 tutorId (避免前端傳來 undefined 導致報錯)
+    const userRes = await pool.query(
+      "SELECT id FROM users WHERE account = $1",
+      [account],
+    );
+    if (userRes.rows.length === 0) {
+      return res
+        .status(404)
+        .json({ success: false, message: "找不到該名學生" });
+    }
+    const tutorId = userRes.rows[0].id;
+
+    // 🌟 使用 for...of 迴圈，逐一處理每一筆時數
+    for (const slot of slots) {
+      const { date, startTime, endTime } = slot;
+
+      // 1. 新增一筆假的課程紀錄 (不需要 tutee_id)
+      const classResult = await pool.query(
+        `INSERT INTO classes (tutor_id, class_date, start_time, end_time, status, tutor_signed_at) 
+         VALUES ($1, $2, $3, $4, 'completed', NOW()) RETURNING id`,
+        [tutorId, date, startTime, endTime],
+      );
+      const newClassId = classResult.rows[0].id;
+
+      // 2. 新增一筆假的課堂紀錄，讓時數計算邏輯成立
+      await pool.query(
+        `INSERT INTO class_notes (class_id, user_id, role, content, updated_at) 
+         VALUES ($1, $2, 'tutor', '管理員手動新增時數', NOW())`,
+        [newClassId, tutorId],
+      );
+
+      // 3. 寫入 hours_review 並直接設定為 approved
+      await pool.query(
+        `INSERT INTO hours_review (class_id, tutor_id, status, reviewed_at) 
+         VALUES ($1, $2, 'approved', NOW())`,
+        [newClassId, tutorId],
+      );
+    }
+
+    res.json({
+      success: true,
+      message: `✅ 成功為學生新增 ${slots.length} 筆輔導時數！`,
+    });
+  } catch (error) {
+    console.error("手動新增時數失敗:", error);
     res.status(500).json({ success: false, message: "伺服器發生錯誤" });
   }
 });
