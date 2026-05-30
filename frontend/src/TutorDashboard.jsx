@@ -1320,28 +1320,23 @@ function TutorDashboard() {
                     key={tutee.tutee_user_id}
                     className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm hover:shadow-md transition flex flex-col"
                   >
-                    <div className="flex justify-between items-start mb-4 pb-4 border-b border-slate-100">
-                      <div className="flex flex-col gap-1.5">
+                    <div className="flex justify-between items-start gap-4 mb-5 pb-4 border-b border-slate-100">
+                      <div className="flex flex-col gap-2">
                         <span
-                          className={`px-2 py-0.5 text-[10px] font-bold rounded w-fit ${tutee.gender === "female" ? "bg-pink-100 text-pink-600" : tutee.gender === "male" ? "bg-sky-100 text-sky-600" : "bg-slate-100 text-slate-500"}`}
+                          className={`px-3 py-1 text-sm font-black rounded-lg w-fit ${tutee.gender === "female" ? "bg-pink-100 text-pink-700" : tutee.gender === "male" ? "bg-sky-100 text-sky-700" : "bg-slate-100 text-slate-600"}`}
                         >
                           {genderLabel}
                         </span>
-                        <p className="text-xs text-slate-400 font-medium">
-                          {tutee.student_id}
-                        </p>
-                      </div>
-                      <div className="text-right">
-                        <span className="block text-xs text-slate-400 font-bold mb-0.5">
-                          華語程度
-                        </span>
-                        <span className="inline-block px-3 py-1 bg-slate-100 text-slate-700 font-black rounded-lg">
-                          {tutee.overall_level}
+                        <span className="text-sm font-bold text-slate-500">
+                          母語：{tutee.native_language || "未提供"}
                         </span>
                       </div>
+                      <span className="inline-flex min-w-14 justify-center px-3 py-1.5 bg-slate-100 text-slate-700 font-black rounded-lg text-lg">
+                        {tutee.overall_level}
+                      </span>
                     </div>
-                    <div className="space-y-4 flex-grow">
-                      <div>
+                    <div className="space-y-5 flex-grow">
+                      <div className="rounded-lg bg-orange-50/40 border border-orange-100 p-3">
                         <span className="text-xs font-bold text-slate-400 flex items-center mb-1.5">
                           <Award size={14} className="mr-1" /> 想加強的技巧
                         </span>
@@ -1358,7 +1353,7 @@ function TutorDashboard() {
                           )}
                         </div>
                       </div>
-                      <div>
+                      <div className="rounded-lg bg-slate-50 border border-slate-100 p-3">
                         <span className="text-xs font-bold text-slate-400 flex items-center mb-1.5">
                           <Clock size={14} className="mr-1" /> 希望上課時間
                         </span>

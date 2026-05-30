@@ -73,6 +73,7 @@ function UserProfile() {
     email: "",
     nationality: "",
     gender: "",
+    nativeLanguage: "",
     overallLevel: "N/A",
     levelListening: 0,
     levelSpeaking: 0,
@@ -119,6 +120,7 @@ function UserProfile() {
               nationality: result.data.nationality || "尚未填寫",
               avatarUrl: "",
               gender: result.data.gender || "",
+              nativeLanguage: result.data.native_language || "尚未填寫",
               overallLevel: result.data.overall_level || "N/A",
               levelListening: result.data.level_listening || 0,
               levelSpeaking: result.data.level_speaking || 0,
@@ -166,6 +168,7 @@ function UserProfile() {
           email: editForm.email,
           nationality: editForm.nationality,
           gender: editForm.gender,
+          nativeLanguage: editForm.nativeLanguage,
           levelListening: editForm.levelListening,
           levelSpeaking: editForm.levelSpeaking,
           levelReading: editForm.levelReading,
@@ -558,6 +561,23 @@ function UserProfile() {
                         className="w-full rounded-lg px-4 py-2.5 outline-none transition bg-slate-50 border border-transparent text-slate-500"
                       />
                     )}
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-slate-600 mb-2">
+                      母語 Native Language
+                    </label>
+                    <input
+                      type="text"
+                      name="nativeLanguage"
+                      value={
+                        isEditingGeneral
+                          ? editForm.nativeLanguage
+                          : userInfo.nativeLanguage
+                      }
+                      onChange={handleInputChange}
+                      disabled={!isEditingGeneral}
+                      className={`w-full rounded-lg px-4 py-2.5 outline-none transition ${isEditingGeneral ? "border border-slate-300 focus:ring-2 focus:ring-slate-400 bg-white text-slate-800" : "bg-slate-50 border border-transparent text-slate-500"}`}
+                    />
                   </div>
                 </div>
               </div>

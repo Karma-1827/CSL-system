@@ -45,6 +45,29 @@ const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
 });
 
+const ensureProfileColumns = async () => {
+  await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS participant_type TEXT");
+  await pool.query(`
+    UPDATE users
+    SET participant_type = CASE
+      WHEN role = 'tutor' THEN 'ntnu_tutor'
+      WHEN role = 'tutee' THEN 'general_tutee'
+      ELSE role
+    END
+    WHERE participant_type IS NULL
+  `);
+  await pool.query(
+    "ALTER TABLE tutee_profiles ADD COLUMN IF NOT EXISTS native_language TEXT",
+  );
+  await pool.query(
+    "ALTER TABLE tutor_profiles ADD COLUMN IF NOT EXISTS native_language TEXT",
+  );
+};
+
+ensureProfileColumns().catch((error) => {
+  console.error("確認 profile 欄位失敗:", error);
+});
+
 app.get("/api/preview/:filename", async (req, res) => {
   const filename = decodeURIComponent(req.params.filename);
   const ext = path.extname(filename).toLowerCase();
@@ -456,7 +479,12 @@ app.post("/api/login", async (req, res) => {
       return res.status(401).json({ success: false, message: "密碼錯誤" });
 
     const token = jwt.sign(
-      { id: user.id, account: user.account, role: user.role },
+      {
+        id: user.id,
+        account: user.account,
+        role: user.role,
+        participantType: user.participant_type,
+      },
       JWT_SECRET,
       { expiresIn: "1d" },
     );
@@ -464,7 +492,12 @@ app.post("/api/login", async (req, res) => {
     res.json({
       success: true,
       message: "登入成功！",
-      data: { name: user.chinese_name, role: user.role, token },
+      data: {
+        name: user.chinese_name,
+        role: user.role,
+        participantType: user.participant_type,
+        token,
+      },
     });
   } catch (error) {
     console.error("登入發生錯誤:", error);
@@ -474,13 +507,26 @@ app.post("/api/login", async (req, res) => {
 
 // 🚀 第三支 API：新使用者註冊 (POST)
 app.post("/api/register", async (req, res) => {
-  const { account, password, email, studentId, role } = req.body;
+  const { account, password, email, studentId, role, participantType } = req.body;
   if (!account || !password || !email || !studentId || !role)
     return res
       .status(400)
       .json({ success: false, message: "所有欄位（包含身份）都必須填寫喔！" });
 
   try {
+    const normalizedParticipantType =
+      participantType || (role === "tutor" ? "ntnu_tutor" : "general_tutee");
+    const allowedParticipantTypes = [
+      "ntnu_tutor",
+      "general_tutee",
+      "maryland_exchange",
+    ];
+    if (!allowedParticipantTypes.includes(normalizedParticipantType)) {
+      return res.status(400).json({ success: false, message: "註冊身份不正確" });
+    }
+    const normalizedRole =
+      normalizedParticipantType === "ntnu_tutor" ? "tutor" : "tutee";
+
     const checkExist = await pool.query(
       "SELECT * FROM users WHERE account = $1 OR email = $2 OR student_id = $3",
       [account, email, studentId],
@@ -495,11 +541,24 @@ app.post("/api/register", async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, salt);
 
     await pool.query(
-      `INSERT INTO users (account, password, email, student_id, role, chinese_name) VALUES ($1, $2, $3, $4, $5, $6)`,
-      [account, hashedPassword, email, studentId, role, ""],
+      `INSERT INTO users (account, password, email, student_id, role, chinese_name, participant_type)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [
+        account,
+        hashedPassword,
+        email,
+        studentId,
+        normalizedRole,
+        "",
+        normalizedParticipantType,
+      ],
     );
 
-    res.json({ success: true, message: "🎉 註冊成功！", data: { role } });
+    res.json({
+      success: true,
+      message: "🎉 註冊成功！",
+      data: { role: normalizedRole, participantType: normalizedParticipantType },
+    });
   } catch (error) {
     console.error("註冊發生錯誤:", error);
     res.status(500).json({ success: false, message: "伺服器發生錯誤" });
@@ -512,6 +571,7 @@ app.post("/api/tutee-profile", async (req, res) => {
     originalStudentId,
     studentId,
     gender,
+    nativeLanguage,
     studentType,
     chineseName,
     englishName,
@@ -552,8 +612,8 @@ app.post("/api/tutee-profile", async (req, res) => {
       `INSERT INTO tutee_profiles 
       (user_id, enrollment_status, nationality, department, program, phone, 
        overall_level, level_listening, level_speaking, level_reading, level_writing, 
-       target_skills, skills_to_improve, available_times, learning_duration, gender) 
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+       target_skills, skills_to_improve, available_times, learning_duration, gender, native_language) 
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
       [
         userId,
         studentType,
@@ -571,6 +631,7 @@ app.post("/api/tutee-profile", async (req, res) => {
         JSON.stringify(preferredTimeSlots),
         learningDuration,
         gender,
+        nativeLanguage,
       ],
     );
 
@@ -587,7 +648,7 @@ app.post("/api/tutee-profile", async (req, res) => {
 app.get("/api/user/:account", async (req, res) => {
   try {
     const result = await pool.query(
-      "SELECT chinese_name, english_name, student_id, role FROM users WHERE account = $1",
+      "SELECT chinese_name, english_name, student_id, role, participant_type FROM users WHERE account = $1",
       [req.params.account],
     );
     if (result.rows.length > 0) {
@@ -607,12 +668,14 @@ app.get("/api/profile/:account", async (req, res) => {
     const result = await pool.query(
       `SELECT 
         u.id as user_id,
-        u.account, u.chinese_name, u.english_name, u.role, u.student_id, u.email,
+        u.account, u.chinese_name, u.english_name, u.role, u.participant_type,
+        u.student_id, u.email,
         p.matched_tutor_id, t.matched_tutee_id,
         COALESCE(p.department, t.department) as department,
         COALESCE(p.phone, t.phone) as phone,
         COALESCE(p.nationality, t.nationality) as nationality,
         COALESCE(p.gender, t.gender) as gender,
+        COALESCE(p.native_language, t.native_language) as native_language,
         p.overall_level, p.learning_duration,
         COALESCE(p.level_listening, t.level_listening) as level_listening,
         COALESCE(p.level_speaking, t.level_speaking) as level_speaking,
@@ -647,6 +710,7 @@ app.post(
     const {
       studentId,
       gender,
+      nativeLanguage,
       chineseName,
       englishName,
       studentStatus,
@@ -683,8 +747,8 @@ app.post(
       await pool.query(
         `INSERT INTO tutor_profiles 
       (user_id, student_status, program, nationality, department, phone, 
-       level_listening, level_speaking, level_reading, level_writing, teaching_notes, available_times, certification_file, gender) 
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+       level_listening, level_speaking, level_reading, level_writing, teaching_notes, available_times, certification_file, gender, native_language) 
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
         [
           userId,
           studentStatus,
@@ -700,6 +764,7 @@ app.post(
           availableTimes,
           certificationFileName,
           gender,
+          nativeLanguage,
         ],
       );
 
@@ -718,6 +783,7 @@ app.get("/api/admin/users/:role", async (req, res) => {
     let query = "";
     if (role === "tutor") {
       query = `SELECT u.id, u.account, u.chinese_name, u.english_name, u.student_id, u.email,
+               u.participant_type,
                t.department, t.phone, t.nationality, t.student_status, t.program, 
                t.level_listening, t.level_speaking, t.level_reading, t.level_writing, 
                t.teaching_notes, t.certification_file, t.certification_status
@@ -726,6 +792,7 @@ app.get("/api/admin/users/:role", async (req, res) => {
                WHERE u.role = 'tutor'`;
     } else if (role === "tutee") {
       query = `SELECT u.id, u.account, u.chinese_name, u.english_name, u.student_id, u.email,
+               u.participant_type,
                p.department, p.phone, p.nationality, p.overall_level, 
                p.target_skills, p.skills_to_improve
                FROM users u 
@@ -816,9 +883,10 @@ app.get("/api/match/tutees", async (req, res) => {
     const query = `
       SELECT 
         u.id as tutee_user_id, u.student_id, u.chinese_name, u.english_name,
+        u.participant_type,
         p.nationality, p.learning_duration, p.overall_level, 
         p.target_skills, p.available_times, p.skills_to_improve,
-        p.gender, 
+        p.gender, p.native_language,
         m.status as match_status, m.tutor_id as matched_tutor_id
       FROM users u
       JOIN tutee_profiles p ON u.id = p.user_id
@@ -968,7 +1036,7 @@ app.get("/api/match/tutor-info/:tutorId", async (req, res) => {
     const result = await pool.query(
       `
       SELECT user_id, u.chinese_name, u.english_name, u.email, 
-             t.student_status, t.department, t.teaching_notes, t.available_times, t.gender
+             t.student_status, t.department, t.teaching_notes, t.available_times, t.gender, t.native_language
       FROM users u
       JOIN tutor_profiles t ON u.id = t.user_id
       WHERE u.id = $1
@@ -988,7 +1056,7 @@ app.get("/api/match/tutee-info/:tuteeId", async (req, res) => {
       `
       SELECT user_id, u.chinese_name, u.english_name, u.email, u.student_id,
              p.nationality, p.department, p.learning_duration, p.overall_level,
-             p.target_skills, p.skills_to_improve, p.available_times, p.gender
+             p.target_skills, p.skills_to_improve, p.available_times, p.gender, p.native_language
       FROM users u
       JOIN tutee_profiles p ON u.id = p.user_id
       WHERE u.id = $1
@@ -2069,6 +2137,7 @@ app.put("/api/profile/:account", async (req, res) => {
     email,
     nationality,
     gender,
+    nativeLanguage,
   } = req.body;
 
   try {
@@ -2092,16 +2161,16 @@ app.put("/api/profile/:account", async (req, res) => {
     if (role === "tutor") {
       await pool.query(
         `UPDATE tutor_profiles 
-         SET department = $1, phone = $2, nationality = $3, gender = $4
-         WHERE user_id = $5`,
-        [department, phone, nationality, gender, userId],
+         SET department = $1, phone = $2, nationality = $3, gender = $4, native_language = $5
+         WHERE user_id = $6`,
+        [department, phone, nationality, gender, nativeLanguage, userId],
       );
     } else if (role === "tutee") {
       await pool.query(
         `UPDATE tutee_profiles 
-         SET department = $1, phone = $2, nationality = $3, gender = $4
-         WHERE user_id = $5`,
-        [department, phone, nationality, gender, userId],
+         SET department = $1, phone = $2, nationality = $3, gender = $4, native_language = $5
+         WHERE user_id = $6`,
+        [department, phone, nationality, gender, nativeLanguage, userId],
       );
     }
 
@@ -2126,6 +2195,7 @@ const handleSave = async (section) => {
         email: editForm.email,
         nationality: editForm.nationality,
         gender: editForm.gender,
+        nativeLanguage: editForm.nativeLanguage,
         levelListening: editForm.levelListening,
         levelSpeaking: editForm.levelSpeaking,
         levelReading: editForm.levelReading,
@@ -2162,6 +2232,7 @@ app.post("/api/profile/update", async (req, res) => {
     email,
     nationality,
     gender,
+    nativeLanguage,
     // tutor 專用
     levelListening,
     levelSpeaking,
@@ -2195,15 +2266,16 @@ app.post("/api/profile/update", async (req, res) => {
     if (role === "tutor") {
       await pool.query(
         `UPDATE tutor_profiles SET
-          department=$1, phone=$2, nationality=$3, gender=$4,
-          level_listening=$5, level_speaking=$6, level_reading=$7, level_writing=$8,
-          teaching_notes=$9, available_times=$10
-         WHERE user_id=$11`,
+          department=$1, phone=$2, nationality=$3, gender=$4, native_language=$5,
+          level_listening=$6, level_speaking=$7, level_reading=$8, level_writing=$9,
+          teaching_notes=$10, available_times=$11
+         WHERE user_id=$12`,
         [
           department,
           phone,
           nationality,
           gender,
+          nativeLanguage,
           levelListening,
           levelSpeaking,
           levelReading,
@@ -2216,17 +2288,18 @@ app.post("/api/profile/update", async (req, res) => {
     } else if (role === "tutee") {
       await pool.query(
         `UPDATE tutee_profiles SET
-          department=$1, phone=$2, nationality=$3, gender=$4,
-          overall_level=$5, learning_duration=$6,
-          level_listening=$7, level_speaking=$8, level_reading=$9, level_writing=$10,
-          target_skills=$11, skills_to_improve=$12,
-          available_times=$13
-         WHERE user_id=$14`,
+          department=$1, phone=$2, nationality=$3, gender=$4, native_language=$5,
+          overall_level=$6, learning_duration=$7,
+          level_listening=$8, level_speaking=$9, level_reading=$10, level_writing=$11,
+          target_skills=$12, skills_to_improve=$13,
+          available_times=$14
+         WHERE user_id=$15`,
         [
           department,
           phone,
           nationality,
           gender,
+          nativeLanguage,
           overallLevel,
           learningDuration,
           levelListening,

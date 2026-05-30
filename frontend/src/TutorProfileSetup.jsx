@@ -42,6 +42,7 @@ function TutorProfileSetup() {
       chineseName: "",
       englishName: "",
       gender: "", // ✨ 新增
+      nativeLanguage: "",
       program: "",
       nationality: "台灣 (Taiwan)",
       department: "華語文教學系",
@@ -100,15 +101,6 @@ function TutorProfileSetup() {
       formData.levelWriting;
     if (totalScore === 0) return alert("請至少為一項教學專業評分 (1~5分)！");
     if (!formData.gender) return alert("請選擇性別！");
-    if (
-      formData.availableDays.length === 0 ||
-      formData.availableTimeSlots.length === 0
-    ) {
-      return alert(
-        "請至少選擇一天與一個時段！\nPlease select at least one day and one time slot.",
-      );
-    }
-
     try {
       const submitData = new FormData();
       submitData.append("studentId", formData.studentId);
@@ -116,6 +108,7 @@ function TutorProfileSetup() {
       submitData.append("chineseName", formData.chineseName);
       submitData.append("englishName", formData.englishName);
       submitData.append("gender", formData.gender); // ✨ 新增
+      submitData.append("nativeLanguage", formData.nativeLanguage);
       submitData.append("program", formData.program);
       submitData.append("nationality", formData.nationality);
       submitData.append("department", formData.department);
@@ -152,16 +145,16 @@ function TutorProfileSetup() {
   };
 
   const renderSkillDots = (skillName, currentValue) => (
-    <div className="flex space-x-2">
+    <div className="grid grid-cols-5 gap-2">
       {[1, 2, 3, 4, 5].map((num) => (
         <button
           key={num}
           type="button"
           onClick={() => setFormData({ ...formData, [skillName]: num })}
-          className={`w-9 h-9 rounded-full flex items-center justify-center font-bold text-sm transition-all ${
+          className={`w-10 h-10 rounded-lg flex items-center justify-center font-black text-sm transition-all ${
             num <= currentValue
-              ? "bg-green-500 text-white shadow-md transform scale-110"
-              : "bg-slate-100 text-slate-400 hover:bg-green-100 hover:text-green-600"
+              ? "bg-green-500 text-white shadow-sm"
+              : "bg-white border border-slate-200 text-slate-400 hover:border-green-200 hover:text-green-600"
           }`}
         >
           {num}
@@ -177,7 +170,7 @@ function TutorProfileSetup() {
           <h2 className="text-3xl font-extrabold text-slate-900 tracking-tight">
             建立小老師專屬檔案
           </h2>
-          <p className="mt-3 text-lg text-slate-500">
+          <p className="mt-3 text-base text-slate-500">
             請完善您的教學履歷，讓我們將您推薦給最適合的外籍學生！
           </p>
         </div>
@@ -188,7 +181,7 @@ function TutorProfileSetup() {
         >
           {/* 區塊 1：基本資訊 */}
           <div className="p-8 md:p-10 border-b border-slate-100">
-            <h3 className="text-xl font-bold text-slate-800 mb-6 flex items-center">
+            <h3 className="text-lg font-bold text-slate-800 mb-6 flex items-center">
               <span className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center mr-3">
                 <User size={18} />
               </span>
@@ -279,6 +272,21 @@ function TutorProfileSetup() {
 
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-1">
+                  母語 Native Language <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  name="nativeLanguage"
+                  value={formData.nativeLanguage}
+                  onChange={handleInputChange}
+                  required
+                  placeholder="e.g., 中文 Mandarin"
+                  className="w-full border border-slate-300 rounded-lg px-4 py-2.5 outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-1">
                   學程 <span className="text-red-500">*</span>
                 </label>
                 <select
@@ -349,32 +357,32 @@ function TutorProfileSetup() {
 
           {/* 區塊 2：教學專業評估 */}
           <div className="p-8 md:p-10 border-b border-slate-100 bg-slate-50/50">
-            <h3 className="text-xl font-bold text-slate-800 mb-6 flex items-center">
+            <h3 className="text-lg font-bold text-slate-800 mb-6 flex items-center">
               <span className="w-8 h-8 rounded-full bg-green-100 text-green-600 flex items-center justify-center mr-3">
                 <BookOpen size={18} />
               </span>
               教學專業評估
             </h3>
-            <div className="mb-8 bg-white p-8 rounded-xl border border-slate-200 shadow-sm">
+            <div className="mb-8 bg-white p-6 md:p-8 rounded-xl border border-slate-200 shadow-sm">
               <label className="block text-sm font-bold text-slate-700 mb-6">
                 華語教學自我評估（1分為最弱，5分為最強）{" "}
                 <span className="text-red-500">*</span>
               </label>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between bg-slate-50 p-4 rounded-xl gap-3">
-                  <span className="font-bold text-slate-700">聽力</span>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+                <div className="bg-slate-50 border border-slate-100 p-4 rounded-xl">
+                  <span className="block font-bold text-slate-700 mb-3">聽力</span>
                   {renderSkillDots("levelListening", formData.levelListening)}
                 </div>
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between bg-slate-50 p-4 rounded-xl gap-3">
-                  <span className="font-bold text-slate-700">口說</span>
+                <div className="bg-slate-50 border border-slate-100 p-4 rounded-xl">
+                  <span className="block font-bold text-slate-700 mb-3">口說</span>
                   {renderSkillDots("levelSpeaking", formData.levelSpeaking)}
                 </div>
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between bg-slate-50 p-4 rounded-xl gap-3">
-                  <span className="font-bold text-slate-700">閱讀</span>
+                <div className="bg-slate-50 border border-slate-100 p-4 rounded-xl">
+                  <span className="block font-bold text-slate-700 mb-3">閱讀</span>
                   {renderSkillDots("levelReading", formData.levelReading)}
                 </div>
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between bg-slate-50 p-4 rounded-xl gap-3">
-                  <span className="font-bold text-slate-700">寫作</span>
+                <div className="bg-slate-50 border border-slate-100 p-4 rounded-xl">
+                  <span className="block font-bold text-slate-700 mb-3">寫作</span>
                   {renderSkillDots("levelWriting", formData.levelWriting)}
                 </div>
               </div>
@@ -387,7 +395,7 @@ function TutorProfileSetup() {
                   value={formData.teachingNotes}
                   onChange={handleInputChange}
                   placeholder="例如：我特別擅長糾正發音..."
-                  className="w-full bg-slate-50 border border-slate-300 p-4 rounded-xl text-slate-700 focus:ring-2 focus:ring-green-400 outline-none resize-none transition"
+                  className="w-full bg-white border border-slate-300 p-4 rounded-xl text-slate-700 outline-none resize-none transition"
                   rows="3"
                 />
               </div>
@@ -422,25 +430,26 @@ function TutorProfileSetup() {
 
           {/* 區塊 3：可輔導時間 */}
           <div className="p-8 md:p-10">
-            <h3 className="text-xl font-bold text-slate-800 mb-6 flex items-center">
+            <h3 className="text-lg font-bold text-slate-800 mb-6 flex items-center">
               <span className="w-8 h-8 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center mr-3">
                 <Clock size={18} />
               </span>
-              可輔導時間 <span className="text-red-500 ml-1">*</span>
+              可輔導時間
+              <span className="ml-2 text-sm font-bold text-slate-400">選填</span>
             </h3>
-            <div className="bg-slate-50 p-6 md:p-8 rounded-xl border border-slate-200">
+            <div className="bg-white p-6 md:p-8 rounded-xl border border-slate-200 shadow-sm">
               <div className="space-y-6">
                 <div>
                   <span className="text-sm font-bold text-slate-500 mb-3 block">
                     1. 請選擇您可以的星期 (可複選) / Select Days
                   </span>
-                  <div className="flex flex-wrap gap-3">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
                     {DAYS.map((day) => (
                       <button
                         key={day.id}
                         type="button"
                         onClick={() => handleDayToggle(day.id)}
-                        className={`px-5 py-2.5 rounded-lg border-2 font-bold transition-all ${
+                        className={`px-4 py-3 rounded-lg border-2 font-bold transition-all ${
                           formData.availableDays.includes(day.id)
                             ? "bg-green-50 border-green-400 text-green-700 shadow-sm"
                             : "bg-white border-slate-200 text-slate-600 hover:border-green-200"
@@ -455,13 +464,13 @@ function TutorProfileSetup() {
                   <span className="text-sm font-bold text-slate-500 mb-3 block">
                     2. 請選擇您可以的時段 (可複選) / Select Time Slots
                   </span>
-                  <div className="flex flex-wrap gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                     {TIME_SLOTS.map((slot) => (
                       <button
                         key={slot}
                         type="button"
                         onClick={() => handleTimeSlotToggle(slot)}
-                        className={`px-5 py-2.5 rounded-lg border-2 font-bold transition-all ${
+                        className={`px-4 py-3 rounded-lg border-2 font-bold transition-all ${
                           formData.availableTimeSlots.includes(slot)
                             ? "bg-green-50 border-green-400 text-green-700 shadow-sm"
                             : "bg-white border-slate-200 text-slate-600 hover:border-green-200"

@@ -25,11 +25,11 @@ const countryList = [
 ];
 
 const DAYS = [
-  { id: "Mon", label: "星期一" },
-  { id: "Tue", label: "星期二" },
-  { id: "Wed", label: "星期三" },
-  { id: "Thu", label: "星期四" },
-  { id: "Fri", label: "星期五" },
+  { id: "Mon", label: "星期一 Mon" },
+  { id: "Tue", label: "星期二 Tue" },
+  { id: "Wed", label: "星期三 Wed" },
+  { id: "Thu", label: "星期四 Thu" },
+  { id: "Fri", label: "星期五 Fri" },
 ];
 
 const TIME_SLOTS = ["09:00-11:00", "11:00-13:00", "13:00-15:00", "15:00-17:00"];
@@ -38,16 +38,22 @@ function TuteeProfileSetup() {
   const navigate = useNavigate();
   const location = useLocation();
   const passedStudentId = location.state?.studentId || "";
+  const participantType = location.state?.participantType || "general_tutee";
+  const defaultProgram =
+    participantType === "maryland_exchange"
+      ? "馬里蘭大學學生 (University of Maryland Student)"
+      : "學士班 (Bachelor)";
 
   const [formData, setFormData] = useState(() => {
     const savedId = localStorage.getItem("savedStudentId") || "";
     return {
-      studentId: savedId,
+      studentId: passedStudentId || savedId,
       studentType: "",
       chineseName: "",
       englishName: "",
       gender: "", // ✨ 新增
-      program: "學士班 (Bachelor)",
+      nativeLanguage: "",
+      program: defaultProgram,
       nationality: "",
       department: "",
       phone: "",
@@ -71,8 +77,17 @@ function TuteeProfileSetup() {
 
   useEffect(() => {
     const savedId = localStorage.getItem("savedStudentId");
-    if (savedId) setFormData((prev) => ({ ...prev, studentId: savedId }));
-  }, []);
+    if (passedStudentId || savedId) {
+      setFormData((prev) => ({
+        ...prev,
+        studentId: passedStudentId || savedId,
+        program:
+          participantType === "maryland_exchange"
+            ? "馬里蘭大學學生 (University of Maryland Student)"
+            : prev.program,
+      }));
+    }
+  }, [participantType, passedStudentId]);
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -152,11 +167,15 @@ function TuteeProfileSetup() {
       <div className="max-w-4xl mx-auto">
         <div className="text-center mb-10">
           <h2 className="text-3xl font-extrabold text-slate-900 tracking-tight">
-            建立您的專屬輔導檔案
+            建立您的專屬輔導檔案 Create Your Tutoring Profile
           </h2>
-          <p className="mt-3 text-lg text-slate-500">
-            請完善以下資訊，我們將為您配對最適合的本系華語小老師！
-          </p>
+          <div className="mt-3 text-base text-slate-500 space-y-1">
+            <p>請完善以下資訊，我們將為您配對最適合的本系華語小老師！</p>
+            <p>
+              Complete your profile so we can match you with a suitable CSL
+              tutor.
+            </p>
+          </div>
         </div>
 
         <form
@@ -165,7 +184,7 @@ function TuteeProfileSetup() {
         >
           {/* 區塊 1：基本資料 */}
           <div className="p-8 md:p-10 border-b border-slate-100">
-            <h3 className="text-xl font-bold text-slate-800 mb-6 flex items-center">
+            <h3 className="text-lg font-bold text-slate-800 mb-6 flex items-center">
               <span className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center mr-3">
                 <User size={18} />
               </span>
@@ -173,7 +192,7 @@ function TuteeProfileSetup() {
             </h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
+                <label className="block text-sm font-bold text-slate-700 mb-1">
                   學號 Student ID <span className="text-red-500">*</span>
                 </label>
                 <input
@@ -182,12 +201,11 @@ function TuteeProfileSetup() {
                   value={formData.studentId}
                   onChange={handleInputChange}
                   required
-                  placeholder="請確認或修改您的學號"
-                  className="w-full border border-slate-300 rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-primary/50 outline-none transition bg-white text-slate-900"
+                  className="w-full border border-slate-300 rounded-lg px-4 py-2.5 outline-none transition"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
+                <label className="block text-sm font-bold text-slate-700 mb-1">
                   身分別 Student Type <span className="text-red-500">*</span>
                 </label>
                 <select
@@ -195,7 +213,7 @@ function TuteeProfileSetup() {
                   value={formData.studentType}
                   onChange={handleInputChange}
                   required
-                  className="w-full border border-slate-300 rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-primary/50 outline-none transition bg-white"
+                  className="w-full border border-slate-300 rounded-lg px-4 py-2.5 outline-none bg-white"
                 >
                   <option value="" disabled>
                     請選擇 Select Type
@@ -207,20 +225,20 @@ function TuteeProfileSetup() {
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  中文名字 Chinese Name
+                <label className="block text-sm font-bold text-slate-700 mb-1">
+                  中文姓名 Chinese Name
                 </label>
                 <input
                   type="text"
                   name="chineseName"
                   value={formData.chineseName}
                   onChange={handleInputChange}
-                  className="w-full border border-slate-300 rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-primary/50 outline-none transition"
+                  className="w-full border border-slate-300 rounded-lg px-4 py-2.5 outline-none"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  英文名字 English Name <span className="text-red-500">*</span>
+                <label className="block text-sm font-bold text-slate-700 mb-1">
+                  英文姓名 English Name <span className="text-red-500">*</span>
                 </label>
                 <input
                   type="text"
@@ -228,46 +246,48 @@ function TuteeProfileSetup() {
                   value={formData.englishName}
                   onChange={handleInputChange}
                   required
-                  className="w-full border border-slate-300 rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-primary/50 outline-none transition"
+                  className="w-full border border-slate-300 rounded-lg px-4 py-2.5 outline-none"
                 />
               </div>
 
               {/* ✨ 新增：性別 */}
-              <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-slate-700 mb-2">
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-1">
                   性別 Gender <span className="text-red-500">*</span>
                 </label>
-                <div className="flex gap-3">
-                  {[
-                    { val: "male", label: "男 Male" },
-                    { val: "female", label: "女 Female" },
-                    { val: "other", label: "非二元性別 Non-binary" },
-                  ].map((g) => (
-                    <label key={g.val} className="flex-1 cursor-pointer">
-                      <input
-                        type="radio"
-                        name="gender"
-                        value={g.val}
-                        checked={formData.gender === g.val}
-                        onChange={handleInputChange}
-                        className="sr-only"
-                      />
-                      <div
-                        className={`text-center px-3 py-2.5 rounded-lg border-2 font-bold text-sm transition-all ${
-                          formData.gender === g.val
-                            ? "bg-blue-50 border-blue-400 text-blue-700 shadow-sm"
-                            : "bg-white border-slate-200 text-slate-500 hover:border-blue-200"
-                        }`}
-                      >
-                        {g.label}
-                      </div>
-                    </label>
-                  ))}
-                </div>
+                <select
+                  name="gender"
+                  value={formData.gender}
+                  onChange={handleInputChange}
+                  required
+                  className="w-full border border-slate-300 rounded-lg px-4 py-2.5 outline-none bg-white"
+                >
+                  <option value="" disabled>
+                    請選擇性別 Select Gender
+                  </option>
+                  <option value="male">男 Male</option>
+                  <option value="female">女 Female</option>
+                  <option value="other">非二元性別 Non-binary</option>
+                </select>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
+                <label className="block text-sm font-bold text-slate-700 mb-1">
+                  母語 Native Language <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  name="nativeLanguage"
+                  value={formData.nativeLanguage}
+                  onChange={handleInputChange}
+                  required
+                  placeholder="e.g., English, 한국어, Tiếng Việt"
+                  className="w-full border border-slate-300 rounded-lg px-4 py-2.5 outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-1">
                   學程 Program <span className="text-red-500">*</span>
                 </label>
                 <select
@@ -275,15 +295,22 @@ function TuteeProfileSetup() {
                   value={formData.program}
                   onChange={handleInputChange}
                   required
-                  className="w-full border border-slate-300 rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-primary/50 outline-none transition"
+                  className="w-full border border-slate-300 rounded-lg px-4 py-2.5 outline-none bg-white"
                 >
                   <option value="學士班 (Bachelor)">學士班 (Bachelor)</option>
                   <option value="碩士班 (Master)">碩士班 (Master)</option>
                   <option value="博士班 (PhD)">博士班 (PhD)</option>
+                  <option value="交換生 (Exchange Student)">
+                    交換生 (Exchange Student)
+                  </option>
+                  <option value="馬里蘭大學學生 (University of Maryland Student)">
+                    馬里蘭大學學生 (University of Maryland Student)
+                  </option>
+                  <option value="其他 (Others)">其他 (Others)</option>
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
+                <label className="block text-sm font-bold text-slate-700 mb-1">
                   國籍 Nationality <span className="text-red-500">*</span>
                 </label>
                 <select
@@ -291,7 +318,7 @@ function TuteeProfileSetup() {
                   value={formData.nationality}
                   onChange={handleInputChange}
                   required
-                  className="w-full border border-slate-300 rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-primary/50 outline-none transition bg-white"
+                  className="w-full border border-slate-300 rounded-lg px-4 py-2.5 outline-none bg-white"
                 >
                   <option value="" disabled>
                     請選擇國籍 Select Nationality
@@ -304,7 +331,7 @@ function TuteeProfileSetup() {
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
+                <label className="block text-sm font-bold text-slate-700 mb-1">
                   就讀系所 Department <span className="text-red-500">*</span>
                 </label>
                 <input
@@ -314,12 +341,12 @@ function TuteeProfileSetup() {
                   onChange={handleInputChange}
                   required
                   placeholder="e.g., 華語文教學系"
-                  className="w-full border border-slate-300 rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-primary/50 outline-none transition"
+                  className="w-full border border-slate-300 rounded-lg px-4 py-2.5 outline-none"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  聯絡電話 Phone Number
+                <label className="block text-sm font-bold text-slate-700 mb-1">
+                  聯絡電話 Phone Number (Optional)
                 </label>
                 <input
                   type="tel"
@@ -327,7 +354,7 @@ function TuteeProfileSetup() {
                   value={formData.phone}
                   onChange={handleInputChange}
                   placeholder="09xx-xxx-xxx"
-                  className="w-full border border-slate-300 rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-primary/50 outline-none transition"
+                  className="w-full border border-slate-300 rounded-lg px-4 py-2.5 outline-none"
                 />
               </div>
             </div>
@@ -335,79 +362,74 @@ function TuteeProfileSetup() {
 
           {/* 區塊 2：華語能力評估 */}
           <div className="p-8 md:p-10 border-b border-slate-100 bg-slate-50/50">
-            <h3 className="text-xl font-bold text-slate-800 mb-6 flex items-center">
+            <h3 className="text-lg font-bold text-slate-800 mb-6 flex items-center">
               <span className="w-8 h-8 rounded-full bg-green-100 text-green-600 flex items-center justify-center mr-3">
                 <Globe size={18} />
               </span>
               華語能力自我評估 Language Proficiency
             </h3>
-            <div className="mb-6">
-              <label className="block font-bold text-slate-700 mb-2">
-                學習華語時間 Learning Duration{" "}
-                <span className="text-red-500">*</span>
-              </label>
-              <select
-                name="learningDuration"
-                value={formData.learningDuration}
-                onChange={handleInputChange}
-                required
-                className="w-full md:w-1/2 border border-slate-300 rounded-lg px-4 py-2.5 outline-none bg-white"
-              >
-                <option value="" disabled>
-                  請選擇 Select Duration
-                </option>
-                <option value="3個月以下 (< 3 months)">
-                  3個月以下 (&lt; 3 months)
-                </option>
-                <option value="3個月 ~ 半年 (3-6 months)">
-                  3個月 ~ 半年 (3-6 months)
-                </option>
-                <option value="半年 ~ 1年 (6-12 months)">
-                  半年 ~ 1年 (6-12 months)
-                </option>
-                <option value="1年 ~ 2年 (1-2 years)">
-                  1年 ~ 2年 (1-2 years)
-                </option>
-                <option value="2年以上 (> 2 years)">
-                  2年以上 (&gt; 2 years)
-                </option>
-              </select>
-            </div>
-            <div className="mb-8 p-5 bg-white rounded-xl border border-slate-200 shadow-sm">
-              <label className="block font-bold text-slate-700 mb-4">
-                整體華語能力 Overall Proficiency
-              </label>
-              <div className="flex flex-wrap gap-3">
-                {[
-                  "不知道 (Unknown)",
-                  "N",
-                  "A1",
-                  "A2",
-                  "B1",
-                  "B2",
-                  "C1",
-                  "C2",
-                ].map((level) => (
-                  <label key={level} className="cursor-pointer">
-                    <input
-                      type="radio"
-                      name="overallLevel"
-                      value={level}
-                      checked={formData.overallLevel === level}
-                      onChange={handleInputChange}
-                      className="sr-only"
-                    />
-                    <div
-                      className={`px-5 py-2 rounded-lg font-bold border-2 transition-all ${formData.overallLevel === level ? "bg-primary border-primary text-white shadow-md" : "bg-slate-50 border-slate-200 text-slate-500 hover:border-primary/50"}`}
-                    >
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-2">
+                  學習華語時間 Learning Duration{" "}
+                  <span className="text-red-500">*</span>
+                </label>
+                <select
+                  name="learningDuration"
+                  value={formData.learningDuration}
+                  onChange={handleInputChange}
+                  required
+                  className="w-full border border-slate-300 rounded-lg px-4 py-2.5 outline-none bg-white"
+                >
+                  <option value="" disabled>
+                    請選擇 Select Duration
+                  </option>
+                  <option value="3個月以下 (< 3 months)">
+                    3個月以下 (&lt; 3 months)
+                  </option>
+                  <option value="3個月 ~ 半年 (3-6 months)">
+                    3個月 ~ 半年 (3-6 months)
+                  </option>
+                  <option value="半年 ~ 1年 (6-12 months)">
+                    半年 ~ 1年 (6-12 months)
+                  </option>
+                  <option value="1年 ~ 2年 (1-2 years)">
+                    1年 ~ 2年 (1-2 years)
+                  </option>
+                  <option value="2年以上 (> 2 years)">
+                    2年以上 (&gt; 2 years)
+                  </option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-2">
+                  整體華語能力 Overall Proficiency
+                </label>
+                <select
+                  name="overallLevel"
+                  value={formData.overallLevel}
+                  onChange={handleInputChange}
+                  className="w-full border border-slate-300 rounded-lg px-4 py-2.5 outline-none bg-white"
+                >
+                  {[
+                    "不知道 (Unknown)",
+                    "N",
+                    "A1",
+                    "A2",
+                    "B1",
+                    "B2",
+                    "C1",
+                    "C2",
+                  ].map((level) => (
+                    <option key={level} value={level}>
                       {level}
-                    </div>
-                  </label>
-                ))}
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
-            <p className="text-sm text-slate-500 mb-4">
-              各項能力評估 (1分最弱，5分最強)
+            <p className="text-sm font-bold text-slate-500 mb-4">
+              各項能力評估 Skill Ratings (1分最弱，5分最強 / 1 = weakest, 5 = strongest)
             </p>
             <div className="space-y-4">
               {[
@@ -450,96 +472,99 @@ function TuteeProfileSetup() {
 
           {/* 區塊 3：輔導需求與時間 */}
           <div className="p-8 md:p-10">
-            <h3 className="text-xl font-bold text-slate-800 mb-6 flex items-center">
+            <h3 className="text-lg font-bold text-slate-800 mb-6 flex items-center">
               <span className="w-8 h-8 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center mr-3">
                 <Clock size={18} />
               </span>
               輔導需求與時間 Tutoring Preferences
             </h3>
-            <div className="mb-8">
-              <label className="block text-sm font-bold text-slate-700 mb-3">
-                想加強的技巧 Target Skills (可複選){" "}
-                <span className="text-red-500">*</span>
-              </label>
-              <div className="flex flex-wrap gap-4 mb-4">
-                {[
-                  { id: "listening", label: "聽力 Listening" },
-                  { id: "speaking", label: "口說 Speaking" },
-                  { id: "reading", label: "閱讀 Reading" },
-                  { id: "writing", label: "寫作 Writing" },
-                ].map((skill) => (
-                  <label
-                    key={skill.id}
-                    className="flex items-center space-x-2 cursor-pointer bg-slate-50 px-4 py-2 border border-slate-200 rounded-lg hover:bg-slate-100 transition"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={formData.targetSkills[skill.id]}
-                      onChange={() => handleTargetSkillToggle(skill.id)}
-                      className="w-4 h-4 text-primary focus:ring-primary border-gray-300 rounded"
-                    />
-                    <span className="font-medium text-slate-700">
-                      {skill.label}
-                    </span>
-                  </label>
-                ))}
-              </div>
-              <textarea
-                name="skillsToImprove"
-                value={formData.skillsToImprove}
-                onChange={handleInputChange}
-                placeholder="其他備註... (Other details...)"
-                rows="3"
-                className="w-full border border-slate-300 rounded-lg px-4 py-3 focus:ring-2 focus:ring-primary/50 outline-none transition resize-none"
-              ></textarea>
-            </div>
-
-            <div className="bg-slate-50 p-6 md:p-8 rounded-xl border border-slate-200">
-              <label className="block text-lg font-bold text-slate-800 mb-6">
-                希望輔導的時段 Preferred Time Slot{" "}
-                <span className="text-red-500">*</span>
-              </label>
-              <div className="space-y-6">
-                <div>
-                  <span className="text-sm font-bold text-slate-500 mb-3 block">
-                    1. 請選擇您可以的星期 (可複選) / Select Days
-                  </span>
-                  <div className="flex flex-wrap gap-3">
-                    {DAYS.map((day) => (
+            <div className="space-y-6">
+              <div className="bg-white p-6 md:p-8 rounded-xl border border-slate-200 shadow-sm">
+                <label className="block text-base font-bold text-slate-800 mb-5">
+                  想加強的技巧 Target Skills (可複選 / Multiple Selection){" "}
+                  <span className="text-red-500">*</span>
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+                  {[
+                    { id: "listening", label: "聽力 Listening" },
+                    { id: "speaking", label: "口說 Speaking" },
+                    { id: "reading", label: "閱讀 Reading" },
+                    { id: "writing", label: "寫作 Writing" },
+                  ].map((skill) => {
+                    const selected = formData.targetSkills[skill.id];
+                    return (
                       <button
-                        key={day.id}
+                        key={skill.id}
                         type="button"
-                        onClick={() => handleDayToggle(day.id)}
-                        className={`px-5 py-2.5 rounded-lg border-2 font-bold transition-all ${
-                          formData.preferredDays.includes(day.id)
+                        onClick={() => handleTargetSkillToggle(skill.id)}
+                        className={`px-4 py-3 rounded-lg border-2 font-bold text-left transition-all ${
+                          selected
                             ? "bg-blue-50 border-blue-400 text-blue-700 shadow-sm"
                             : "bg-white border-slate-200 text-slate-600 hover:border-blue-200"
                         }`}
                       >
-                        {day.label}
+                        {skill.label}
                       </button>
-                    ))}
-                  </div>
+                    );
+                  })}
                 </div>
-                <div>
-                  <span className="text-sm font-bold text-slate-500 mb-3 block">
-                    2. 請選擇您可以的時段 (可複選) / Select Time Slots
-                  </span>
-                  <div className="flex flex-wrap gap-3">
-                    {TIME_SLOTS.map((slot) => (
-                      <button
-                        key={slot}
-                        type="button"
-                        onClick={() => handleTimeSlotToggle(slot)}
-                        className={`px-5 py-2.5 rounded-lg border-2 font-bold transition-all ${
-                          formData.preferredTimeSlots.includes(slot)
-                            ? "bg-blue-50 border-blue-400 text-blue-700 shadow-sm"
-                            : "bg-white border-slate-200 text-slate-600 hover:border-blue-200"
-                        }`}
-                      >
-                        {slot}
-                      </button>
-                    ))}
+                <textarea
+                  name="skillsToImprove"
+                  value={formData.skillsToImprove}
+                  onChange={handleInputChange}
+                  placeholder="其他備註... (Other details...)"
+                  rows="3"
+                  className="w-full border border-slate-300 rounded-lg px-4 py-3 outline-none transition resize-none"
+                ></textarea>
+              </div>
+
+              <div className="bg-white p-6 md:p-8 rounded-xl border border-slate-200 shadow-sm">
+                <label className="block text-base font-bold text-slate-800 mb-5">
+                  希望輔導的時段 Preferred Time Slots{" "}
+                  <span className="text-red-500">*</span>
+                </label>
+                <div className="space-y-6">
+                  <div>
+                    <span className="text-sm font-bold text-slate-500 mb-3 block">
+                      1. 請選擇您可以的星期 (可複選) / Select Days
+                    </span>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+                      {DAYS.map((day) => (
+                        <button
+                          key={day.id}
+                          type="button"
+                          onClick={() => handleDayToggle(day.id)}
+                          className={`px-4 py-3 rounded-lg border-2 font-bold transition-all ${
+                            formData.preferredDays.includes(day.id)
+                              ? "bg-blue-50 border-blue-400 text-blue-700 shadow-sm"
+                              : "bg-white border-slate-200 text-slate-600 hover:border-blue-200"
+                          }`}
+                        >
+                          {day.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <span className="text-sm font-bold text-slate-500 mb-3 block">
+                      2. 請選擇您可以的時段 (可複選) / Select Time Slots
+                    </span>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                      {TIME_SLOTS.map((slot) => (
+                        <button
+                          key={slot}
+                          type="button"
+                          onClick={() => handleTimeSlotToggle(slot)}
+                          className={`px-4 py-3 rounded-lg border-2 font-bold transition-all ${
+                            formData.preferredTimeSlots.includes(slot)
+                              ? "bg-blue-50 border-blue-400 text-blue-700 shadow-sm"
+                              : "bg-white border-slate-200 text-slate-600 hover:border-blue-200"
+                          }`}
+                        >
+                          {slot}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -552,7 +577,7 @@ function TuteeProfileSetup() {
               className="flex items-center px-10 py-3.5 bg-primary text-white font-bold rounded-xl shadow-md hover:shadow-lg hover:bg-primary-dark hover:-translate-y-0.5 transition-all duration-200"
             >
               <CheckCircle2 size={20} className="mr-2" />
-              完成
+              完成 Submit
             </button>
           </div>
         </form>
