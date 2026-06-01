@@ -31,12 +31,20 @@ import logoImg from "./assets/csl-Logo.png";
 import Certificate from "./Certificate";
 
 const DAYS_MAP = { Mon: "一", Tue: "二", Wed: "三", Thu: "四", Fri: "五" };
+const DAY_ORDER = ["Mon", "Tue", "Wed", "Thu", "Fri"];
+const SLOT_ORDER = ["09:00-11:00", "11:00-13:00", "13:00-15:00", "15:00-17:00"];
 const SKILL_MAP = {
   listening: "聽力",
   speaking: "口說",
   reading: "閱讀",
   writing: "寫作",
 };
+
+const sortDays = (days = []) =>
+  [...days].sort((a, b) => DAY_ORDER.indexOf(a) - DAY_ORDER.indexOf(b));
+
+const sortSlots = (slots = []) =>
+  [...slots].sort((a, b) => SLOT_ORDER.indexOf(a) - SLOT_ORDER.indexOf(b));
 
 // ─── 聊天視窗元件 ───────────────────────────────────────────
 function ChatWindow({ myUserId, myAccount, partner, onClose, wsRef, onRead }) {
@@ -197,6 +205,7 @@ function TutorDashboard() {
   const [filterOpen, setFilterOpen] = useState(false);
   const [filterGender, setFilterGender] = useState("All");
   const [filterLevel, setFilterLevel] = useState("All");
+  const [filterNativeLanguage, setFilterNativeLanguage] = useState("");
   const [filterSkills, setFilterSkills] = useState([]);
   const [filterDays, setFilterDays] = useState([]);
   const [filterSlots, setFilterSlots] = useState([]);
@@ -207,17 +216,13 @@ function TutorDashboard() {
     { id: "Thu", label: "四" },
     { id: "Fri", label: "五" },
   ];
-  const FILTER_SLOTS = [
-    "09:00-11:00",
-    "11:00-13:00",
-    "13:00-15:00",
-    "15:00-17:00",
-  ];
+  const FILTER_SLOTS = SLOT_ORDER;
   const toggleArr = (arr, setArr, val) =>
     setArr(arr.includes(val) ? arr.filter((x) => x !== val) : [...arr, val]);
   const resetFilters = () => {
     setFilterGender("All");
     setFilterLevel("All");
+    setFilterNativeLanguage("");
     setFilterSkills([]);
     setFilterDays([]);
     setFilterSlots([]);
@@ -225,6 +230,7 @@ function TutorDashboard() {
   const activeFilterCount = [
     filterGender !== "All",
     filterLevel !== "All",
+    filterNativeLanguage.trim() !== "",
     filterSkills.length > 0,
     filterDays.length > 0 || filterSlots.length > 0,
   ].filter(Boolean).length;
@@ -1018,51 +1024,48 @@ function TutorDashboard() {
     const futureClasses = upcomingAndFuture.slice(1);
 
     return (
-      <>
-        <main className="flex-grow flex flex-col gap-6 animate-fade-in max-w-3xl">
+      <main className="flex-grow w-full flex flex-col gap-6 animate-fade-in">
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+          <div className="bg-slate-600 px-6 py-3 border-b border-slate-700/20">
+            <h2 className="text-sm font-bold text-white tracking-wider">
+              即將上課 Upcoming Class
+            </h2>
+          </div>
+          <div className="p-6 bg-slate-50/50">
+            {upcomingClass && matchedTutee ? (
+              renderClassCard(upcomingClass, "upcoming")
+            ) : (
+              <div className="text-center py-8 text-slate-500 font-medium">
+                目前尚無即將到來的課程。
+              </div>
+            )}
+          </div>
+        </div>
+        {futureClasses.length > 0 && (
           <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-            <div className="bg-slate-600 px-6 py-3 border-b border-slate-700/20">
-              <h2 className="text-sm font-bold text-white tracking-wider">
-                即將上課 Upcoming Class
+            <div className="bg-white px-6 py-3 border-b border-slate-100">
+              <h2 className="text-sm font-bold text-slate-600 tracking-wider">
+                未來上課 Future Classes
               </h2>
             </div>
-            <div className="p-6 bg-slate-50/50">
-              {upcomingClass && matchedTutee ? (
-                renderClassCard(upcomingClass, "upcoming")
-              ) : (
-                <div className="text-center py-8 text-slate-500 font-medium">
-                  目前尚無即將到來的課程。
-                </div>
-              )}
+            <div className="p-6 flex flex-col gap-4 bg-slate-50/30">
+              {futureClasses.map((cls) => renderClassCard(cls, "normal"))}
             </div>
           </div>
-          {futureClasses.length > 0 && (
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-              <div className="bg-white px-6 py-3 border-b border-slate-100">
-                <h2 className="text-sm font-bold text-slate-600 tracking-wider">
-                  未來上課 Future Classes
-                </h2>
-              </div>
-              <div className="p-6 flex flex-col gap-4 bg-slate-50/30">
-                {futureClasses.map((cls) => renderClassCard(cls, "normal"))}
-              </div>
-            </div>
-          )}
-          {/* 過去課程提示 */}
-          <div className="bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 text-sm text-slate-500 flex items-center gap-3">
-            <Award size={18} className="text-slate-400 flex-shrink-0" />
-            過去的上課紀錄與時數，請前往「
-            <button
-              onClick={() => setActiveTab("hours")}
-              className="text-primary font-bold hover:underline"
-            >
-              輔導時數
-            </button>
-            」查看。
-          </div>
-        </main>
-        <aside className="hidden xl:flex w-72 flex-col gap-6 flex-shrink-0" />
-      </>
+        )}
+        {/* 過去課程提示 */}
+        <div className="bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 text-sm text-slate-500 flex items-center gap-3">
+          <Award size={18} className="text-slate-400 flex-shrink-0" />
+          過去的上課紀錄與時數，請前往「
+          <button
+            onClick={() => setActiveTab("hours")}
+            className="text-primary font-bold hover:underline"
+          >
+            輔導時數
+          </button>
+          」查看。
+        </div>
+      </main>
     );
   };
 
@@ -1138,6 +1141,14 @@ function TutorDashboard() {
       if (filterGender !== "All" && tutee.gender !== filterGender) return false;
       if (filterLevel !== "All" && tutee.overall_level !== filterLevel)
         return false;
+      const nativeLanguageKeyword = filterNativeLanguage.trim().toLowerCase();
+      if (
+        nativeLanguageKeyword &&
+        !(tutee.native_language || "")
+          .toLowerCase()
+          .includes(nativeLanguageKeyword)
+      )
+        return false;
       if (filterSkills.length > 0 && !filterSkills.every((s) => skills[s]))
         return false;
       if (
@@ -1186,7 +1197,7 @@ function TutorDashboard() {
                       { val: "All", label: "全部" },
                       { val: "male", label: "男" },
                       { val: "female", label: "女" },
-                      { val: "other", label: "其他" },
+                      { val: "other", label: "非二元性別" },
                     ].map((g) => (
                       <button
                         key={g.val}
@@ -1223,6 +1234,18 @@ function TutorDashboard() {
                       </option>
                     ))}
                   </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-2">
+                    🌐 母語關鍵字
+                  </label>
+                  <input
+                    type="text"
+                    value={filterNativeLanguage}
+                    onChange={(e) => setFilterNativeLanguage(e.target.value)}
+                    placeholder="例如：English、英文、한국어"
+                    className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-primary"
+                  />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-500 mb-2">
@@ -1302,6 +1325,8 @@ function TutorDashboard() {
                   typeof tutee.available_times === "string"
                     ? JSON.parse(tutee.available_times)
                     : tutee.available_times || { days: [], slots: [] };
+                const sortedDays = sortDays(times.days || []);
+                const sortedSlots = sortSlots(times.slots || []);
                 let btnState = "available";
                 if (tutee.match_status === "accepted")
                   btnState = "matched_others";
@@ -1313,7 +1338,7 @@ function TutorDashboard() {
                     : tutee.gender === "female"
                       ? "女 Female"
                       : tutee.gender === "other"
-                        ? "其他"
+                        ? "非二元性別"
                         : "未提供";
                 return (
                   <div
@@ -1358,7 +1383,7 @@ function TutorDashboard() {
                           <Clock size={14} className="mr-1" /> 希望上課時間
                         </span>
                         <div className="flex flex-wrap gap-2">
-                          {(times.days || []).map((d) => (
+                          {sortedDays.map((d) => (
                             <span
                               key={d}
                               className="px-2 py-1 text-xs font-bold rounded bg-slate-100 text-slate-600"
@@ -1366,13 +1391,12 @@ function TutorDashboard() {
                               {DAYS_MAP[d]}
                             </span>
                           ))}
-                          {(times.days || []).length > 0 &&
-                            (times.slots || []).length > 0 && (
-                              <span className="text-slate-300 font-bold px-1">
-                                |
-                              </span>
-                            )}
-                          {(times.slots || []).map((s) => (
+                          {sortedDays.length > 0 && sortedSlots.length > 0 && (
+                            <span className="text-slate-300 font-bold px-1">
+                              |
+                            </span>
+                          )}
+                          {sortedSlots.map((s) => (
                             <span
                               key={s}
                               className="px-2 py-1 text-xs font-bold rounded bg-slate-100 text-slate-600"
@@ -1397,7 +1421,7 @@ function TutorDashboard() {
                           }
                           className="flex items-center px-4 py-2 bg-primary text-white text-sm font-bold rounded-lg hover:bg-primary-dark transition shadow-sm"
                         >
-                          <Send size={16} className="mr-2" /> 👋 發送邀請
+                          <Send size={16} className="mr-2" /> 發送邀請
                         </button>
                       ) : btnState === "pending_others" ? (
                         <button
@@ -1411,7 +1435,7 @@ function TutorDashboard() {
                           disabled
                           className="flex items-center px-4 py-2 bg-slate-100 text-slate-400 text-sm font-bold rounded-lg cursor-not-allowed"
                         >
-                          ❌ 已配對
+                          ❌ 已解除配對
                         </button>
                       )}
                     </div>
@@ -1451,6 +1475,8 @@ function TutorDashboard() {
         typeof matchedTutee.available_times === "string"
           ? JSON.parse(matchedTutee.available_times)
           : matchedTutee.available_times || { days: [], slots: [] };
+      const sortedDays = sortDays(times.days || []);
+      const sortedSlots = sortSlots(times.slots || []);
       return (
         <main className="flex-grow animate-fade-in">
           <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
@@ -1570,7 +1596,7 @@ function TutorDashboard() {
                       📅 星期 Days
                     </span>
                     <div className="flex flex-wrap gap-2">
-                      {(times.days || []).map((d) => (
+                      {sortedDays.map((d) => (
                         <span
                           key={d}
                           className="px-3 py-1 bg-slate-50 border border-slate-200 text-slate-600 text-sm font-bold rounded-md"
@@ -1578,7 +1604,7 @@ function TutorDashboard() {
                           {DAYS_MAP[d] || d}
                         </span>
                       ))}
-                      {(!times.days || times.days.length === 0) && (
+                      {sortedDays.length === 0 && (
                         <span className="text-slate-400 text-sm italic">
                           未設定
                         </span>
@@ -1590,7 +1616,7 @@ function TutorDashboard() {
                       ⏰ 時段 Time Slots
                     </span>
                     <div className="flex flex-wrap gap-2">
-                      {(times.slots || []).map((s) => (
+                      {sortedSlots.map((s) => (
                         <span
                           key={s}
                           className="px-3 py-1 bg-slate-50 border border-slate-200 text-slate-600 text-sm font-bold rounded-md"
@@ -1598,7 +1624,7 @@ function TutorDashboard() {
                           {s}
                         </span>
                       ))}
-                      {(!times.slots || times.slots.length === 0) && (
+                      {sortedSlots.length === 0 && (
                         <span className="text-slate-400 text-sm italic">
                           未設定
                         </span>
@@ -1812,7 +1838,7 @@ function TutorDashboard() {
                     設定上課時段 <span className="text-red-500">*</span>
                   </h4>
                   <span className="text-xs font-bold bg-amber-100 text-amber-700 px-2 py-1 rounded-md">
-                    一週最多 2 小時
+                    09:00-17:00・每週最多 2 小時
                   </span>
                 </div>
                 {slots.map((slot, index) => (
@@ -1859,6 +1885,9 @@ function TutorDashboard() {
                           onChange={(e) =>
                             handleSlotChange(index, "startTime", e.target.value)
                           }
+                          min="09:00"
+                          max="17:00"
+                          step="900"
                           required
                           className="w-full border border-slate-300 rounded-lg px-3 py-2 outline-none focus:border-primary text-sm"
                         />
@@ -1873,6 +1902,9 @@ function TutorDashboard() {
                           onChange={(e) =>
                             handleSlotChange(index, "endTime", e.target.value)
                           }
+                          min="09:00"
+                          max="17:00"
+                          step="900"
                           required
                           className="w-full border border-slate-300 rounded-lg px-3 py-2 outline-none focus:border-primary text-sm"
                         />

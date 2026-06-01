@@ -46,6 +46,12 @@ function AdminDashboard() {
   const [viewMode, setViewMode] = useState("grid");
   const [studentsList, setStudentsList] = useState([]);
   const [selectedStudent, setSelectedStudent] = useState(null);
+  const [semesterTerm, setSemesterTerm] = useState(null);
+  const [semesterForm, setSemesterForm] = useState({
+    name: "",
+    startDate: "",
+    endDate: "",
+  });
 
   const [pendingReviews, setPendingReviews] = useState([]);
   const [approvedReviews, setApprovedReviews] = useState([]);
@@ -194,6 +200,7 @@ function AdminDashboard() {
     if (
       activeTab === "tutors" ||
       activeTab === "tutees" ||
+      activeTab === "maryland" ||
       activeTab === "home" ||
       activeTab === "review-data"
     ) {
@@ -218,13 +225,65 @@ function AdminDashboard() {
           }
         });
 
-      if (activeTab === "tutees") {
+      if (activeTab === "tutees" || activeTab === "maryland") {
         fetch(`http://localhost:3001/api/admin/users/tutee`)
           .then((res) => res.json())
           .then((result) => {
-            if (result.success) setStudentsList(result.data);
+            if (result.success) {
+              const data =
+                activeTab === "maryland"
+                  ? result.data.filter(
+                      (student) =>
+                        student.participant_type === "maryland_exchange",
+                    )
+                  : result.data.filter(
+                      (student) =>
+                        student.participant_type !== "maryland_exchange",
+                    );
+              setStudentsList(data);
+            }
           });
       }
+    }
+  };
+
+  const fetchSemesterTerm = () => {
+    fetch("http://localhost:3001/api/admin/semester-term")
+      .then((res) => res.json())
+      .then((result) => {
+        if (result.success) {
+          setSemesterTerm(result.data);
+          if (result.data) {
+            setSemesterForm({
+              name: result.data.name || "",
+              startDate: result.data.start_date || "",
+              endDate: result.data.end_date || "",
+            });
+          }
+        }
+      });
+  };
+
+  const handleSemesterSubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const res = await fetch("http://localhost:3001/api/admin/semester-term", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(semesterForm),
+      });
+      const data = await res.json();
+      alert(data.message);
+      if (data.success) {
+        setSemesterTerm(data.data);
+        setSemesterForm({
+          name: data.data.name || "",
+          startDate: data.data.start_date || "",
+          endDate: data.data.end_date || "",
+        });
+      }
+    } catch {
+      alert("連線錯誤");
     }
   };
 
@@ -238,6 +297,7 @@ function AdminDashboard() {
   useEffect(() => {
     fetchStudents();
     setSelectedStudent(null);
+    if (activeTab === "semester") fetchSemesterTerm();
   }, [activeTab]);
 
   useEffect(() => {
@@ -1475,7 +1535,11 @@ function AdminDashboard() {
                   {selectedStudent.department || "未填寫系所"}
                 </p>
                 <span className="inline-block mt-2 px-3 py-1 bg-slate-100 text-slate-600 text-xs font-bold rounded-full">
-                  {activeTab === "tutors" ? "小老師 Tutor" : "外籍生 Tutee"}
+                  {activeTab === "tutors"
+                    ? "小老師 Tutor"
+                    : activeTab === "maryland"
+                      ? "馬里蘭大學學生 Maryland Student"
+                      : "外籍生 Tutee"}
                 </span>
               </div>
               {/* 👇 新增這顆按鈕，只有在看小老師時才顯示 */}
@@ -1562,7 +1626,11 @@ function AdminDashboard() {
       <main className="flex-grow flex flex-col bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
         <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
           <h2 className="font-bold text-slate-800 text-lg">
-            {activeTab === "tutors" ? "本系學生 (小老師) 清單" : "外籍生清單"}
+            {activeTab === "tutors"
+              ? "本系學生 (小老師) 清單"
+              : activeTab === "maryland"
+                ? "馬里蘭大學學生清單"
+                : "外籍生清單"}
           </h2>
           <div className="flex bg-white border border-slate-200 rounded-lg p-0.5 shadow-sm">
             <button
@@ -1647,6 +1715,108 @@ function AdminDashboard() {
       </main>
     );
   };
+
+  const renderSemesterSettings = () => (
+    <main className="flex-grow bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden animate-fade-in">
+      <div className="px-8 py-6 border-b border-slate-100 bg-slate-50/50">
+        <h2 className="font-bold text-slate-800 text-xl flex items-center">
+          <Calendar size={22} className="mr-2 text-purple-600" />
+          學期日期設定
+        </h2>
+        <p className="text-sm text-slate-500 mt-2">
+          此日期範圍會限制小老師只能在學期間安排課程。
+        </p>
+      </div>
+      <div className="p-8 grid grid-cols-1 xl:grid-cols-[1fr_360px] gap-8">
+        <form
+          onSubmit={handleSemesterSubmit}
+          className="bg-slate-50 border border-slate-200 rounded-2xl p-6 space-y-5"
+        >
+          <div>
+            <label className="block text-sm font-bold text-slate-700 mb-2">
+              學期名稱 <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              value={semesterForm.name}
+              onChange={(e) =>
+                setSemesterForm((prev) => ({ ...prev, name: e.target.value }))
+              }
+              placeholder="例如：114-2"
+              required
+              className="w-full border border-slate-300 rounded-xl px-4 py-3 outline-none focus:border-purple-500 bg-white"
+            />
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <div>
+              <label className="block text-sm font-bold text-slate-700 mb-2">
+                開始日期 <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="date"
+                value={semesterForm.startDate}
+                onChange={(e) =>
+                  setSemesterForm((prev) => ({
+                    ...prev,
+                    startDate: e.target.value,
+                  }))
+                }
+                required
+                className="w-full border border-slate-300 rounded-xl px-4 py-3 outline-none focus:border-purple-500 bg-white"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-bold text-slate-700 mb-2">
+                結束日期 <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="date"
+                value={semesterForm.endDate}
+                onChange={(e) =>
+                  setSemesterForm((prev) => ({
+                    ...prev,
+                    endDate: e.target.value,
+                  }))
+                }
+                required
+                className="w-full border border-slate-300 rounded-xl px-4 py-3 outline-none focus:border-purple-500 bg-white"
+              />
+            </div>
+          </div>
+          <button
+            type="submit"
+            className="inline-flex items-center justify-center px-6 py-3 bg-purple-600 text-white font-bold rounded-xl hover:bg-purple-700 transition shadow-sm"
+          >
+            <CheckCircle size={18} className="mr-2" />
+            儲存學期日期
+          </button>
+        </form>
+
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm h-fit">
+          <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">
+            目前啟用學期
+          </p>
+          {semesterTerm ? (
+            <div>
+              <h3 className="text-2xl font-black text-slate-800 mb-2">
+                {semesterTerm.name}
+              </h3>
+              <p className="text-slate-500 font-medium">
+                {semesterTerm.start_date} 至 {semesterTerm.end_date}
+              </p>
+              <div className="mt-5 rounded-xl bg-purple-50 border border-purple-100 px-4 py-3 text-sm text-purple-700 font-bold">
+                小老師排課日期會以此區間為準。
+              </div>
+            </div>
+          ) : (
+            <div className="text-slate-400 font-medium">
+              尚未設定啟用中的學期日期。
+            </div>
+          )}
+        </div>
+      </div>
+    </main>
+  );
 
   const renderUnmatchRequests = () => (
     <main className="flex-grow flex flex-col gap-4 animate-fade-in">
@@ -2128,6 +2298,16 @@ function AdminDashboard() {
                 外籍生
               </li>
               <li
+                onClick={() => setActiveTab("maryland")}
+                className={`flex items-center p-3 rounded-xl cursor-pointer transition ${activeTab === "maryland" ? "bg-purple-50 text-purple-600 font-bold" : "hover:bg-slate-50"}`}
+              >
+                <BookOpen
+                  size={20}
+                  className={`mr-4 ${activeTab === "maryland" ? "text-purple-600" : "text-slate-400"}`}
+                />
+                馬里蘭大學
+              </li>
+              <li
                 onClick={() => setActiveTab("checkin-mgmt")}
                 className={`flex items-center p-3 rounded-xl cursor-pointer transition ${activeTab === "checkin-mgmt" ? "bg-purple-50 text-purple-600 font-bold" : "hover:bg-slate-50"}`}
               >
@@ -2231,6 +2411,16 @@ function AdminDashboard() {
                 />
                 檔案
               </li>
+              <li
+                onClick={() => setActiveTab("semester")}
+                className={`flex items-center p-3 rounded-xl cursor-pointer transition ${activeTab === "semester" ? "bg-purple-50 text-purple-600 font-bold" : "hover:bg-slate-50"}`}
+              >
+                <Calendar
+                  size={20}
+                  className={`mr-4 ${activeTab === "semester" ? "text-purple-600" : "text-slate-400"}`}
+                />
+                學期日期設定
+              </li>
             </ul>
           </div>
         </aside>
@@ -2247,9 +2437,11 @@ function AdminDashboard() {
                   ? renderReviewData()
                   : activeTab === "files"
                     ? renderFiles()
-                    : activeTab === "cert-apps" // 👈 加上這行
-                      ? renderCertApps() // 👈 加上這行
-                      : renderStudentDirectory()}
+                    : activeTab === "semester"
+                      ? renderSemesterSettings()
+                      : activeTab === "cert-apps"
+                        ? renderCertApps()
+                        : renderStudentDirectory()}
       </div>
 
       {/* 詳細內容 Modal */}

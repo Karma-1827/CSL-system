@@ -20,6 +20,7 @@ import {
   Award,
   AlertCircle,
   ChevronRight,
+  Download,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import logoImg from "./assets/csl-Logo.png";
@@ -58,16 +59,6 @@ function ChatWindow({ myUserId, myAccount, partner, onClose, wsRef, onRead }) {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
-
-  useEffect(() => {
-    if (!notifDropdownOpen) return;
-    const handleClick = (e) => {
-      if (!e.target.closest("[data-notif-dropdown]"))
-        setNotifDropdownOpen(false);
-    };
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, [notifDropdownOpen]);
 
   const handleSend = async () => {
     if (!input.trim()) return;
@@ -183,6 +174,7 @@ function TuteeDashboard() {
     chineseName: "",
     englishName: "",
     role: "tutee",
+    participant_type: "",
     matched_tutor_id: null,
   });
   const [requests, setRequests] = useState([]);
@@ -371,6 +363,16 @@ function TuteeDashboard() {
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, [msgDropdownOpen]);
+
+  useEffect(() => {
+    if (!notifDropdownOpen) return;
+    const handleClick = (e) => {
+      if (!e.target.closest("[data-notif-dropdown]"))
+        setNotifDropdownOpen(false);
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [notifDropdownOpen]);
 
   const displayName = userInfo.chinese_Name
     ? `${userInfo.chinese_name} ${userInfo.english_name}`
@@ -609,6 +611,52 @@ function TuteeDashboard() {
     }
   };
 
+  const isMarylandStudent = userInfo.participant_type === "maryland_exchange";
+
+  const getClassHours = (row) => {
+    if (!row?.start_time || !row?.end_time) return 0;
+    const [startHour, startMinute] = row.start_time.split(":").map(Number);
+    const [endHour, endMinute] = row.end_time.split(":").map(Number);
+    const startTotal = startHour * 60 + startMinute;
+    const endTotal = endHour * 60 + endMinute;
+    return Math.max(0, (endTotal - startTotal) / 60);
+  };
+
+  const approvedMarylandRows = classHistory.filter(
+    (row) => row.hours_review_status === "approved",
+  );
+  const marylandCompletedHours = approvedMarylandRows.reduce(
+    (sum, row) => sum + getClassHours(row),
+    0,
+  );
+
+  const handleDownloadMarylandCertificate = async () => {
+    try {
+      const res = await fetch("http://localhost:3001/api/generate-cert-pdf", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: userInfo.user_id }),
+      });
+
+      if (!res.ok) throw new Error("下載失敗");
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.setAttribute(
+        "download",
+        `${userInfo.chineseName || userInfo.englishName || "maryland"}_語言交換時數證明.pdf`,
+      );
+      document.body.appendChild(link);
+      link.click();
+      link.parentNode.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch {
+      alert("下載發生錯誤，請確認後端伺服器狀態！");
+    }
+  };
+
   // ═══════════════════════════════════════════════════════
   // 課程卡片
   // ═══════════════════════════════════════════════════════
@@ -821,7 +869,7 @@ function TuteeDashboard() {
     const futureClasses = upcomingAndFuture.slice(1);
 
     return (
-      <main className="flex-grow flex flex-col gap-6 animate-fade-in max-w-3xl">
+      <main className="flex-grow w-full flex flex-col gap-6 animate-fade-in">
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
           <div className="bg-slate-600 px-6 py-3 border-b border-slate-700/20">
             <h2 className="text-sm font-bold text-white tracking-wider">
@@ -1386,6 +1434,226 @@ function TuteeDashboard() {
     );
   };
 
+  const renderMarylandCertificate = () => {
+    const rows = classHistory.map((r) => {
+      const [y, m, d] = r.class_date.split("-").map(Number);
+      return {
+        ...r,
+        hasSigned: !!r.tutee_signed_at,
+        hasNote: !!r.note_id,
+        hrs: getClassHours(r),
+        displayDate: new Date(y, m - 1, d),
+      };
+    });
+    const estimatedPct = Math.min(marylandCompletedHours * 2, 100);
+
+    const reviewBadge = (row) => {
+      if (row.hours_review_status === "approved") {
+        return (
+          <span className="px-2.5 py-1 bg-green-100 text-green-700 text-xs font-bold rounded-full flex items-center gap-1 w-fit">
+            <CheckCircle size={12} /> 已計入
+          </span>
+        );
+      }
+      if (row.hasSigned && row.hasNote) {
+        return (
+          <span className="px-2.5 py-1 bg-amber-100 text-amber-700 text-xs font-bold rounded-full w-fit">
+            待審核
+          </span>
+        );
+      }
+      return (
+        <span className="px-2.5 py-1 bg-slate-100 text-slate-500 text-xs font-bold rounded-full w-fit">
+          {!row.hasSigned && !row.hasNote
+            ? "需簽到＋填紀錄"
+            : !row.hasSigned
+              ? "需完成簽到"
+              : "需填寫紀錄"}
+        </span>
+      );
+    };
+
+    return (
+      <main className="flex-grow w-full flex flex-col gap-6 animate-fade-in">
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+          <div className="bg-gradient-to-r from-slate-700 to-slate-500 px-8 py-5">
+            <h2 className="font-bold text-white text-lg flex items-center gap-2">
+              <Award size={20} /> 時數證明 Hours Certificate
+            </h2>
+            <p className="text-slate-300 text-sm mt-1">
+              馬里蘭大學語言交換計畫時數（規定時數待確認，已審核紀錄會自動計入）
+            </p>
+          </div>
+          <div className="p-8">
+            <div className="flex flex-col gap-5 lg:flex-row lg:items-end">
+              <div className="flex items-end gap-3">
+                <span className="text-6xl font-black text-slate-800 tabular-nums">
+                  {marylandCompletedHours.toFixed(1)}
+                </span>
+                <span className="text-2xl font-bold text-slate-400 mb-1.5">
+                  / ? 小時
+                </span>
+              </div>
+              <div className="flex flex-wrap items-center gap-3 lg:ml-auto">
+                <span className="text-sm font-bold px-3 py-1.5 rounded-full bg-slate-100 text-slate-500">
+                  目標待定
+                </span>
+                <button
+                  onClick={handleDownloadMarylandCertificate}
+                  className="flex items-center gap-2 px-5 py-3 bg-primary text-white font-bold rounded-xl hover:bg-primary-dark transition shadow-md"
+                >
+                  <Download size={18} /> 下載時數證明
+                </button>
+              </div>
+            </div>
+            <div className="w-full bg-slate-100 rounded-full h-5 overflow-hidden mt-8">
+              <div
+                className="h-5 rounded-full bg-primary transition-all duration-700"
+                style={{ width: `${estimatedPct}%` }}
+              />
+            </div>
+            <div className="flex justify-between text-xs font-bold text-slate-400 mt-2">
+              <span>0 hr</span>
+              <span>?</span>
+              <span>?</span>
+              <span>?</span>
+              <span>? hr</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+          <div className="bg-slate-50 px-8 py-4 border-b border-slate-100 flex justify-between items-center">
+            <h3 className="font-bold text-slate-700 flex items-center gap-2">
+              <FileText size={18} className="text-primary" /> 語言交換時數明細
+            </h3>
+            <span className="text-xs text-slate-400 font-medium">
+              共 {rows.length} 堂課
+            </span>
+          </div>
+
+          {rows.length === 0 ? (
+            <div className="py-16 text-center text-slate-400 font-medium">
+              <Calendar size={40} className="mx-auto mb-3 text-slate-200" />
+              尚無任何課程紀錄
+            </div>
+          ) : (
+            <div className="divide-y divide-slate-100">
+              <div className="hidden md:grid grid-cols-[2fr_1.2fr_1fr_1fr_1fr_1.5fr] px-6 py-3 bg-slate-50/80 text-xs font-bold text-slate-400 uppercase tracking-wider">
+                <span>日期 / 時間</span>
+                <span>老師</span>
+                <span>時長</span>
+                <span>學生簽到</span>
+                <span>課堂紀錄</span>
+                <span>審查狀態</span>
+              </div>
+
+              {rows.map((row) => {
+                const isExpanded = expandedRow === row.class_id;
+                return (
+                  <div key={row.class_id}>
+                    <div
+                      onClick={() =>
+                        setExpandedRow(isExpanded ? null : row.class_id)
+                      }
+                      className={`grid grid-cols-1 md:grid-cols-[2fr_1.2fr_1fr_1fr_1fr_1.5fr] px-6 py-4 items-center gap-3 cursor-pointer transition ${isExpanded ? "bg-blue-50/40" : "hover:bg-slate-50"}`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div
+                          className={`w-11 h-11 rounded-xl flex flex-col items-center justify-center flex-shrink-0 ${row.hours_review_status === "approved" ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-500"}`}
+                        >
+                          <span className="text-[9px] font-bold uppercase">
+                            {row.displayDate.toLocaleDateString("en-US", {
+                              month: "short",
+                            })}
+                          </span>
+                          <span className="text-sm font-black leading-none">
+                            {row.displayDate.getDate()}
+                          </span>
+                        </div>
+                        <div>
+                          <p className="font-bold text-slate-700 text-sm">
+                            {row.class_date}
+                          </p>
+                          <p className="text-xs text-slate-400">
+                            {row.start_time.substring(0, 5)} ~{" "}
+                            {row.end_time.substring(0, 5)}
+                          </p>
+                        </div>
+                        <ChevronRight
+                          size={14}
+                          className={`text-slate-300 transition-transform ${isExpanded ? "rotate-90" : ""}`}
+                        />
+                      </div>
+                      <div className="hidden md:block">
+                        <p className="text-sm font-bold text-slate-700 truncate">
+                          {row.tutor_chinese_name ||
+                            row.tutor_english_name ||
+                            "—"}
+                        </p>
+                        {row.tutor_chinese_name && row.tutor_english_name && (
+                          <p className="text-xs text-slate-400 truncate">
+                            {row.tutor_english_name}
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex items-baseline gap-1">
+                        <span
+                          className={`font-black text-xl ${row.hours_review_status === "approved" ? "text-green-600" : "text-slate-700"}`}
+                        >
+                          {row.hrs.toFixed(1)}
+                        </span>
+                        <span className="text-xs text-slate-400 font-bold">
+                          hr
+                        </span>
+                      </div>
+                      <div>
+                        {row.hasSigned ? (
+                          <span className="flex items-center gap-1 text-green-600 text-xs font-bold">
+                            <CheckCircle size={14} /> 已簽到
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1 text-slate-400 text-xs font-bold">
+                            <AlertCircle size={14} /> 未簽到
+                          </span>
+                        )}
+                      </div>
+                      <div>
+                        {row.hasNote ? (
+                          <span className="flex items-center gap-1 text-green-600 text-xs font-bold">
+                            <CheckCircle size={14} /> 已填寫
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1 text-slate-400 text-xs font-bold">
+                            <AlertCircle size={14} /> 未填寫
+                          </span>
+                        )}
+                      </div>
+                      <div>{reviewBadge(row)}</div>
+                    </div>
+
+                    {isExpanded && row.note_content && (
+                      <div className="bg-blue-50/30 border-t border-blue-100 px-6 py-4">
+                        <div className="p-3 bg-white rounded-xl border border-slate-200 text-xs text-slate-600">
+                          <span className="font-bold text-slate-400 block mb-1">
+                            上課內容摘要：
+                          </span>
+                          <p className="leading-relaxed line-clamp-2">
+                            {row.note_content}
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </main>
+    );
+  };
+
   // ═══════════════════════════════════════════════════════
   // JSX
   // ═══════════════════════════════════════════════════════
@@ -1611,6 +1879,18 @@ function TuteeDashboard() {
                 />{" "}
                 上課紀錄
               </li>
+              {isMarylandStudent && (
+                <li
+                  onClick={() => setActiveTab("certificate")}
+                  className={`flex items-center p-3 rounded-xl cursor-pointer transition group ${activeTab === "certificate" ? "bg-primary/10 text-primary font-bold" : "text-slate-600 hover:bg-slate-50 hover:text-primary"}`}
+                >
+                  <Award
+                    size={20}
+                    className={`mr-4 ${activeTab === "certificate" ? "text-primary" : "text-slate-400 group-hover:text-primary"}`}
+                  />{" "}
+                  時數證明
+                </li>
+              )}
             </ul>
           </div>
         </aside>
@@ -1621,7 +1901,9 @@ function TuteeDashboard() {
             ? renderMyTutor()
             : activeTab === "history"
               ? renderHistory()
-              : renderHome()}
+              : activeTab === "certificate" && isMarylandStudent
+                ? renderMarylandCertificate()
+                : renderHome()}
       </div>
 
       {/* ── Modals ── */}

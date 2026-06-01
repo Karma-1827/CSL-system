@@ -33,6 +33,12 @@ const DAYS = [
 ];
 
 const TIME_SLOTS = ["09:00-11:00", "11:00-13:00", "13:00-15:00", "15:00-17:00"];
+const MARYLAND_TIME_LABELS = {
+  "09:00-11:00": "前一天 20:00-22:00 EST / 21:00-23:00 EDT",
+  "11:00-13:00": "前一天 22:00-00:00 EST / 23:00-01:00 EDT",
+  "13:00-15:00": "00:00-02:00 EST / 01:00-03:00 EDT",
+  "15:00-17:00": "02:00-04:00 EST / 03:00-05:00 EDT",
+};
 
 function TuteeProfileSetup() {
   const navigate = useNavigate();
@@ -74,6 +80,9 @@ function TuteeProfileSetup() {
       preferredTimeSlots: [],
     };
   });
+  const isMarylandStudent =
+    participantType === "maryland_exchange" ||
+    formData.program.includes("馬里蘭大學學生");
 
   useEffect(() => {
     const savedId = localStorage.getItem("savedStudentId");
@@ -429,7 +438,8 @@ function TuteeProfileSetup() {
               </div>
             </div>
             <p className="text-sm font-bold text-slate-500 mb-4">
-              各項能力評估 Skill Ratings (1分最弱，5分最強 / 1 = weakest, 5 = strongest)
+              各項能力評估 Skill Ratings (1分最弱，5分最強 / 1 = weakest, 5 =
+              strongest)
             </p>
             <div className="space-y-4">
               {[
@@ -545,26 +555,52 @@ function TuteeProfileSetup() {
                       ))}
                     </div>
                   </div>
-                  <div>
-                    <span className="text-sm font-bold text-slate-500 mb-3 block">
-                      2. 請選擇您可以的時段 (可複選) / Select Time Slots
-                    </span>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                      {TIME_SLOTS.map((slot) => (
-                        <button
-                          key={slot}
-                          type="button"
-                          onClick={() => handleTimeSlotToggle(slot)}
-                          className={`px-4 py-3 rounded-lg border-2 font-bold transition-all ${
-                            formData.preferredTimeSlots.includes(slot)
-                              ? "bg-blue-50 border-blue-400 text-blue-700 shadow-sm"
-                              : "bg-white border-slate-200 text-slate-600 hover:border-blue-200"
-                          }`}
-                        >
-                          {slot}
-                        </button>
-                      ))}
-                    </div>
+	                  <div>
+	                    <span className="text-sm font-bold text-slate-500 mb-3 block">
+	                      2. 請選擇您可以的時段 (可複選) / Select Time Slots
+	                    </span>
+	                    {isMarylandStudent && (
+	                      <div className="mb-4 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+	                        <p className="font-bold">
+	                          時段以台灣時間儲存 / Times are saved in Taiwan time.
+	                        </p>
+	                        <p className="mt-1 text-blue-700">
+	                          下方提供馬里蘭時間對照；因夏令時間，EST/EDT 會差 1
+	                          小時。
+	                        </p>
+	                      </div>
+	                    )}
+	                    <div
+	                      className={`grid grid-cols-1 ${
+	                        isMarylandStudent
+	                          ? "sm:grid-cols-2"
+	                          : "sm:grid-cols-2 lg:grid-cols-4"
+	                      } gap-3`}
+	                    >
+	                      {TIME_SLOTS.map((slot) => (
+	                        <button
+	                          key={slot}
+	                          type="button"
+	                          onClick={() => handleTimeSlotToggle(slot)}
+	                          className={`px-4 py-3 rounded-lg border-2 font-bold transition-all text-left ${
+	                            formData.preferredTimeSlots.includes(slot)
+	                              ? "bg-blue-50 border-blue-400 text-blue-700 shadow-sm"
+	                              : "bg-white border-slate-200 text-slate-600 hover:border-blue-200"
+	                          }`}
+	                        >
+	                          {isMarylandStudent ? (
+	                            <span className="flex flex-col gap-1">
+	                              <span>{slot} Taiwan</span>
+	                              <span className="text-xs font-semibold text-slate-500 leading-snug">
+	                                Maryland: {MARYLAND_TIME_LABELS[slot]}
+	                              </span>
+	                            </span>
+	                          ) : (
+	                            slot
+	                          )}
+	                        </button>
+	                      ))}
+	                    </div>
                   </div>
                 </div>
               </div>

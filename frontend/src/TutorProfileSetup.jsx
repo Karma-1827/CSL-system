@@ -370,19 +370,27 @@ function TutorProfileSetup() {
               </label>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
                 <div className="bg-slate-50 border border-slate-100 p-4 rounded-xl">
-                  <span className="block font-bold text-slate-700 mb-3">聽力</span>
+                  <span className="block font-bold text-slate-700 mb-3">
+                    聽力
+                  </span>
                   {renderSkillDots("levelListening", formData.levelListening)}
                 </div>
                 <div className="bg-slate-50 border border-slate-100 p-4 rounded-xl">
-                  <span className="block font-bold text-slate-700 mb-3">口說</span>
+                  <span className="block font-bold text-slate-700 mb-3">
+                    口說
+                  </span>
                   {renderSkillDots("levelSpeaking", formData.levelSpeaking)}
                 </div>
                 <div className="bg-slate-50 border border-slate-100 p-4 rounded-xl">
-                  <span className="block font-bold text-slate-700 mb-3">閱讀</span>
+                  <span className="block font-bold text-slate-700 mb-3">
+                    閱讀
+                  </span>
                   {renderSkillDots("levelReading", formData.levelReading)}
                 </div>
                 <div className="bg-slate-50 border border-slate-100 p-4 rounded-xl">
-                  <span className="block font-bold text-slate-700 mb-3">寫作</span>
+                  <span className="block font-bold text-slate-700 mb-3">
+                    寫作
+                  </span>
                   {renderSkillDots("levelWriting", formData.levelWriting)}
                 </div>
               </div>
@@ -404,7 +412,7 @@ function TutorProfileSetup() {
             <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
               <label className="block text-sm font-bold text-slate-700 mb-2 flex items-center">
                 <Award size={18} className="mr-2 text-slate-500" /> 資格認證上傳
-                (選填)
+                (本地生不需上傳)
               </label>
               <p className="text-xs text-slate-500 mb-4">
                 請上傳您的成績單、華語師資證明或相關文件 (支援 PDF, DOCX, 圖片)
@@ -435,7 +443,9 @@ function TutorProfileSetup() {
                 <Clock size={18} />
               </span>
               可輔導時間
-              <span className="ml-2 text-sm font-bold text-slate-400">選填</span>
+              <span className="ml-2 text-sm font-bold text-slate-400">
+                選填
+              </span>
             </h3>
             <div className="bg-white p-6 md:p-8 rounded-xl border border-slate-200 shadow-sm">
               <div className="space-y-6">

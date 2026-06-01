@@ -191,7 +191,8 @@ function App() {
             重設密碼 Reset Password
           </h2>
           <p className="text-sm text-slate-500 text-center mb-8">
-            請輸入您的帳號與學號以驗證身份 / Verify your account with your username and student ID.
+            請輸入您的帳號與學號以驗證身份 / Verify your account with your
+            username and student ID.
           </p>
 
           <form className="space-y-4" onSubmit={handleResetPassword}>
@@ -258,7 +259,10 @@ function App() {
       </main>
 
       <footer className="bg-white border-t border-gray-200 py-4 px-6 flex justify-between items-center text-sm text-gray-500">
-        <div>© 2026 華語系 Department of Chinese as a Second Language. All rights reserved.</div>
+        <div>
+          © 2026 華語系 Department of Chinese as a Second Language. All rights
+          reserved.
+        </div>
       </footer>
     </div>
   );
@@ -274,7 +278,7 @@ function App() {
         <div className="w-full max-w-5xl grid grid-cols-1 lg:grid-cols-[1.05fr_0.95fr] gap-8 items-stretch">
           <div className="bg-primary p-10 md:p-12 shadow-lg rounded-2xl flex flex-col justify-center text-white min-h-[480px]">
             <div className="space-y-4">
-              <p className="text-sm font-semibold uppercase tracking-[0.18em] text-white/70">
+              <p className="text-lg font-semibold uppercase tracking-[0.18em] text-white/70">
                 NTNU CSL
               </p>
               <h1 className="text-3xl md:text-4xl font-bold leading-tight tracking-wide">
@@ -288,7 +292,7 @@ function App() {
                 Department of Chinese as a Second Language
               </p>
             </div>
-            <div className="space-y-5 mt-14">
+            <div className="space-y-5 mt-10">
               <div className="w-16 h-1 bg-white/35 rounded-full"></div>
               <div>
                 <h2 className="text-2xl font-bold mb-2">外籍生輔導系統</h2>
@@ -305,13 +309,8 @@ function App() {
                 {isLoginMode ? "Sign In" : "Create Account"}
               </p>
               <h2 className="text-3xl font-bold text-slate-900">
-                {isLoginMode ? "系統登入 Sign In" : "建立新帳號 Create Account"}
+                {isLoginMode ? "系統登入" : "建立新帳號"}
               </h2>
-              <p className="text-sm text-slate-500 mt-2">
-                {isLoginMode
-                  ? "Sign in to access your tutoring dashboard."
-                  : "Register your account and complete your profile."}
-              </p>
             </div>
             <form
               className="space-y-4"
@@ -349,28 +348,17 @@ function App() {
                     <label className="block text-sm font-semibold text-slate-700 mb-2">
                       註冊身份 Registration Type
                     </label>
-                    <div className="grid grid-cols-1 gap-2">
+                    <select
+                      value={regParticipantType}
+                      onChange={(e) => setRegParticipantType(e.target.value)}
+                      className="w-full border border-slate-300 rounded-lg px-4 py-2.5 bg-white text-slate-800 font-semibold focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition"
+                    >
                       {registerTypes.map((type) => (
-                        <label
-                          key={type.id}
-                          className={`flex items-center gap-3 rounded-lg border px-4 py-3 cursor-pointer transition ${
-                            regParticipantType === type.id
-                              ? "border-primary bg-primary/5 text-primary shadow-sm"
-                              : "border-slate-200 bg-white text-slate-700 hover:border-primary/50"
-                          }`}
-                        >
-                          <input
-                            type="radio"
-                            name="participantType"
-                            value={type.id}
-                            checked={regParticipantType === type.id}
-                            onChange={(e) => setRegParticipantType(e.target.value)}
-                            className="w-4 h-4 text-primary focus:ring-primary border-gray-300"
-                          />
-                          <span className="text-sm font-semibold">{type.label}</span>
-                        </label>
+                        <option key={type.id} value={type.id}>
+                          {type.label}
+                        </option>
                       ))}
-                    </div>
+                    </select>
                   </div>
                 </>
               )}
@@ -382,7 +370,7 @@ function App() {
                   type="text"
                   value={account}
                   onChange={(e) => setAccount(e.target.value)}
-                  placeholder="請輸入英數字帳號 / Enter username"
+                  placeholder="請輸入帳號 / Enter username"
                   required
                   className="w-full border border-slate-300 rounded-lg px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition"
                 />
@@ -406,28 +394,11 @@ function App() {
                   type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="輸入密碼 / Enter password"
+                  placeholder="請輸入密碼 / Enter password"
                   required
                   className="w-full border border-slate-300 rounded-lg px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition"
                 />
               </div>
-              {isLoginMode && (
-                <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-1.5">
-                    驗證碼 Verification Code
-                  </label>
-                  <div className="grid grid-cols-[1fr_140px] gap-3">
-                    <input
-                      type="text"
-                      placeholder="輸入驗證碼 / Enter code"
-                      className="w-full border border-slate-300 rounded-lg px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition"
-                    />
-                    <div className="bg-slate-50 flex items-center justify-center rounded-lg border border-slate-200 border-dashed text-slate-500 font-mono tracking-widest text-lg select-none">
-                      A2C8
-                    </div>
-                  </div>
-                </div>
-              )}
               <button
                 type="submit"
                 className="w-full bg-primary text-white font-bold py-3 rounded-lg mt-6 hover:bg-primary-dark transition duration-200 shadow-md hover:shadow-lg"
@@ -462,7 +433,10 @@ function App() {
         </div>
       </main>
       <footer className="bg-white border-t border-gray-200 py-4 px-6 flex justify-between items-center text-sm text-gray-500">
-        <div>© 2026 華語系 Department of Chinese as a Second Language. All rights reserved.</div>
+        <div>
+          © 2026 華語系 Department of Chinese as a Second Language. All rights
+          reserved.
+        </div>
         <div className="text-gray-500 font-medium hidden md:block">
           臺師大華語系 NTNU CSL
         </div>

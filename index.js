@@ -45,7 +45,88 @@ const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
 });
 
+const MAX_TUTEES_PER_TUTOR = 2;
+const MAX_PENDING_INVITES_PER_TUTOR = 3;
+const MAX_HOURS_PER_TUTOR_TUTEE_PAIR = 32;
+const MAX_HOURS_PER_TUTOR_SEMESTER = 64;
+const TEACHING_DAY_START = "09:00";
+const TEACHING_DAY_END = "17:00";
+
+const timeToMinutes = (time = "") => {
+  const [hours, minutes] = time.split(":").map(Number);
+  return hours * 60 + minutes;
+};
+
+const hoursBetween = (start, end) =>
+  (timeToMinutes(end) - timeToMinutes(start)) / 60;
+
+const toDateOnly = (value) => {
+  if (!value) return "";
+  if (value instanceof Date) return value.toISOString().split("T")[0];
+  return String(value).split("T")[0];
+};
+
+const getActiveSemesterTerm = async (client = pool) => {
+  const result = await client.query(
+    `SELECT id, name, start_date::text, end_date::text
+     FROM semester_terms
+     WHERE is_active = TRUE
+     ORDER BY id DESC
+     LIMIT 1`,
+  );
+  return result.rows[0] || null;
+};
+
+const getScheduledHours = async (
+  client,
+  { tutorId, tuteeId = null, startDate, endDate, excludeClassId = null },
+) => {
+  const params = [tutorId, startDate, endDate];
+  let tuteeClause = "";
+  let excludeClause = "";
+
+  if (tuteeId) {
+    params.push(tuteeId);
+    tuteeClause = `AND c.tutee_id = $${params.length}`;
+  }
+
+  if (excludeClassId) {
+    params.push(excludeClassId);
+    excludeClause = `AND c.id != $${params.length}`;
+  }
+
+  const result = await client.query(
+    `
+    SELECT COALESCE(SUM(
+      EXTRACT(EPOCH FROM (
+        TO_TIMESTAMP(c.end_time::text, 'HH24:MI:SS') -
+        TO_TIMESTAMP(c.start_time::text, 'HH24:MI:SS')
+      )) / 3600.0
+    ), 0) AS total_hours
+    FROM classes c
+    WHERE c.tutor_id = $1
+      AND c.class_date BETWEEN $2 AND $3
+      AND COALESCE(c.status, '') != 'cancelled'
+      ${tuteeClause}
+      ${excludeClause}
+    `,
+    params,
+  );
+  return parseFloat(result.rows[0].total_hours || 0);
+};
+
 const ensureProfileColumns = async () => {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS semester_terms (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      start_date DATE NOT NULL,
+      end_date DATE NOT NULL,
+      is_active BOOLEAN NOT NULL DEFAULT FALSE,
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW()
+    )
+  `);
   await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS participant_type TEXT");
   await pool.query(`
     UPDATE users
@@ -130,13 +211,7 @@ app.post("/api/generate-cert-pdf", async (req, res) => {
   try {
     // 1. 撈取資料
     const userRes = await pool.query(
-      "SELECT chinese_name, student_id FROM users WHERE id = $1",
-      [userId],
-    );
-    const classesRes = await pool.query(
-      `SELECT c.class_date::text as date, EXTRACT(EPOCH FROM (TO_TIMESTAMP(c.end_time::text, 'HH24:MI:SS') - TO_TIMESTAMP(c.start_time::text, 'HH24:MI:SS'))) / 3600.0 AS hours
-       FROM hours_review hr JOIN classes c ON hr.class_id = c.id
-       WHERE hr.tutor_id = $1 AND hr.status = 'approved' ORDER BY c.class_date ASC`,
+      "SELECT chinese_name, english_name, student_id, role, participant_type FROM users WHERE id = $1",
       [userId],
     );
 
@@ -145,12 +220,37 @@ app.post("/api/generate-cert-pdf", async (req, res) => {
       return res.status(404).json({ success: false, message: "找不到使用者" });
     }
 
+    const isMarylandCertificate = user.participant_type === "maryland_exchange";
+    const classesRes = await pool.query(
+      isMarylandCertificate
+        ? `SELECT c.class_date::text as date,
+             EXTRACT(EPOCH FROM (TO_TIMESTAMP(c.end_time::text, 'HH24:MI:SS') - TO_TIMESTAMP(c.start_time::text, 'HH24:MI:SS'))) / 3600.0 AS hours
+           FROM hours_review hr
+           JOIN classes c ON hr.class_id = c.id
+           WHERE c.tutee_id = $1
+             AND hr.status = 'approved'
+             AND c.status != 'cancelled'
+           ORDER BY c.class_date ASC`
+        : `SELECT c.class_date::text as date,
+             EXTRACT(EPOCH FROM (TO_TIMESTAMP(c.end_time::text, 'HH24:MI:SS') - TO_TIMESTAMP(c.start_time::text, 'HH24:MI:SS'))) / 3600.0 AS hours
+           FROM hours_review hr
+           JOIN classes c ON hr.class_id = c.id
+           WHERE hr.tutor_id = $1
+             AND hr.status = 'approved'
+           ORDER BY c.class_date ASC`,
+      [userId],
+    );
+
     const totalHours = classesRes.rows
       .reduce((sum, cls) => sum + parseFloat(cls.hours), 0)
       .toFixed(1);
 
-    // 2. 讀取 template.pdf
-    const templatePath = path.join(__dirname, "uploads", "template.pdf");
+    // 2. 讀取證書模板：馬里蘭語言交換證書使用獨立模板
+    const templatePath = path.join(
+      __dirname,
+      "uploads",
+      isMarylandCertificate ? "template2.pdf" : "template.pdf",
+    );
     const existingPdfBytes = fs.readFileSync(templatePath);
     const pdfDoc = await PDFDocument.load(existingPdfBytes);
     const templatePdfDoc = await PDFDocument.load(existingPdfBytes);
@@ -188,27 +288,58 @@ app.post("/api/generate-cert-pdf", async (req, res) => {
     };
 
     const drawTableHeader = (page, y) => {
+      const dateLabel = isMarylandCertificate ? "交流日期" : "輔導日期";
+      const dateLabelEn = isMarylandCertificate
+        ? "Exchange Date"
+        : "Tutoring Date";
+      const hoursLabel = isMarylandCertificate ? "交流時數" : "輔導時數";
+      const hoursLabelEn = isMarylandCertificate
+        ? "Exchange Hours"
+        : "Tutoring Hours";
+
       drawCenteredText(
         page,
-        "輔導日期",
+        dateLabel,
         dateColumn,
         y,
-        15,
+        14,
         customFont,
         rgb(0, 0, 0),
       );
+      if (isMarylandCertificate) {
+        drawCenteredText(
+          page,
+          dateLabelEn,
+          dateColumn,
+          y - 13,
+          9,
+          timesFont,
+          rgb(0, 0, 0),
+        );
+      }
       drawCenteredText(
         page,
-        "輔導時數",
+        hoursLabel,
         hoursColumn,
         y,
-        15,
+        14,
         customFont,
         rgb(0, 0, 0),
       );
+      if (isMarylandCertificate) {
+        drawCenteredText(
+          page,
+          hoursLabelEn,
+          hoursColumn,
+          y - 13,
+          9,
+          timesFont,
+          rgb(0, 0, 0),
+        );
+      }
       page.drawLine({
-        start: { x: tableStartX, y: y - 5 },
-        end: { x: tableEndX, y: y - 5 },
+        start: { x: tableStartX, y: y - (isMarylandCertificate ? 18 : 5) },
+        end: { x: tableEndX, y: y - (isMarylandCertificate ? 18 : 5) },
         thickness: 2.25,
         color: rgb(0, 0, 0),
       });
@@ -222,7 +353,15 @@ app.post("/api/generate-cert-pdf", async (req, res) => {
         const words = part.text.split(""); // 逐字處理，確保中文斷行精準
         for (const char of words) {
           const textSize = part.size || size;
-          const charWidth = part.font.widthOfTextAtSize(char, textSize);
+          if (char === "\n") {
+            currentX = x;
+            currentY -= 25;
+            continue;
+          }
+          const charFont = /[^\x00-\x7F]/.test(char)
+            ? customFont
+            : part.font;
+          const charWidth = charFont.widthOfTextAtSize(char, textSize);
           // 檢查是否超出邊界 (maxWidth = 450)
           if (currentX + charWidth > x + maxWidth) {
             currentX = x; // 回到左邊界
@@ -235,7 +374,7 @@ app.post("/api/generate-cert-pdf", async (req, res) => {
               x: currentX - 0.5,
               y: currentY,
               size: textSize,
-              font: part.font,
+              font: charFont,
               color: part.color,
             });
             // 向右偏移一點點
@@ -243,7 +382,7 @@ app.post("/api/generate-cert-pdf", async (req, res) => {
               x: currentX + 0.5,
               y: currentY,
               size: textSize,
-              font: part.font,
+              font: charFont,
               color: part.color,
             });
             // 原位再畫一次確保填滿
@@ -251,7 +390,7 @@ app.post("/api/generate-cert-pdf", async (req, res) => {
               x: currentX,
               y: currentY,
               size: textSize,
-              font: part.font,
+              font: charFont,
               color: part.color,
             });
           }
@@ -260,7 +399,7 @@ app.post("/api/generate-cert-pdf", async (req, res) => {
             x: currentX,
             y: currentY,
             size: textSize,
-            font: part.font,
+            font: charFont,
             color: part.color || rgb(0, 0, 0),
           });
           currentX += charWidth;
@@ -270,9 +409,12 @@ app.post("/api/generate-cert-pdf", async (req, res) => {
     };
 
     // 2. 定義內容段落
+    const certificateName = user.chinese_name || user.english_name || "";
+    const englishCertificateName =
+      user.english_name || user.student_id || "the student";
     const section1Parts = [
       {
-        text: `茲證明 ${user.chinese_name} 同學（學號：`,
+        text: `茲證明 ${certificateName} 同學（學號：`,
         font: customFont,
         size: 16,
         color: darkBlue,
@@ -286,18 +428,70 @@ app.post("/api/generate-cert-pdf", async (req, res) => {
         bold: true,
       },
       { text: `）`, font: customFont, size: 16, color: darkBlue, bold: true },
+      ...(isMarylandCertificate
+        ? [
+            {
+              text: `\nThis is to certify that ${englishCertificateName} (Student ID: `,
+              font: timesFont,
+              size: 12,
+              color: darkBlue,
+              bold: true,
+            },
+            {
+              text: `${user.student_id})`,
+              font: timesFont,
+              size: 12,
+              color: darkBlue,
+              bold: true,
+            },
+          ]
+        : []),
     ];
 
-    const section2Parts = [
-      {
-        text: "於本系擔任外籍生華語輔導小老師期間，積極輔導外籍學生學習華語，認真履行輔導職責，已完成輔導實習時數共",
-        font: customFont,
-        size: 14,
-        color: darkBlue,
-      },
-      { text: `${totalHours}`, font: timesFont, size: 14, color: darkBlue },
-      { text: "小時，特此證明。", font: customFont, size: 14, color: darkBlue },
-    ];
+    const section2Parts = isMarylandCertificate
+      ? [
+          {
+            text: "於本系與馬里蘭大學語言交換計畫期間，參與華語學習與語言交流活動，已完成語言交換時數共",
+            font: customFont,
+            size: 14,
+            color: darkBlue,
+          },
+          { text: `${totalHours}`, font: timesFont, size: 14, color: darkBlue },
+          {
+            text: "小時，特此證明。\n",
+            font: customFont,
+            size: 14,
+            color: darkBlue,
+          },
+          {
+            text: "During the NTNU CSL and University of Maryland Language Exchange Program, the student participated in Chinese language learning and language exchange activities and completed ",
+            font: timesFont,
+            size: 12,
+            color: darkBlue,
+          },
+          { text: `${totalHours}`, font: timesFont, size: 14, color: darkBlue },
+          {
+            text: " hours of language exchange. This certificate is hereby issued.",
+            font: timesFont,
+            size: 12,
+            color: darkBlue,
+          },
+        ]
+      : [
+          {
+            text: "於本系擔任外籍生華語輔導小老師期間，積極輔導外籍學生學習華語，認真履行輔導職責，已完成輔導實習時數共",
+            font: customFont,
+            size: 14,
+            color: darkBlue,
+          },
+          { text: `${totalHours}`, font: timesFont, size: 14, color: darkBlue },
+          {
+            text: "小時，特此證明。",
+            font: customFont,
+            size: 14,
+            color: darkBlue,
+          },
+        ];
 
     // 3. 執行繪製 (會自動計算斷行後的 Y 座標)
     let currentY = 570;
@@ -365,14 +559,26 @@ app.post("/api/generate-cert-pdf", async (req, res) => {
       thickness: 2.25,
       color: rgb(0, 0, 0),
     });
-    currentPage.drawText("總時數", {
-      x:
-        dateColumn.x +
-        (dateColumn.width - customFont.widthOfTextAtSize("總時數", 14)) / 2,
-      y: totalY,
-      size: 14,
-      font: customFont,
-    });
+    drawCenteredText(
+      currentPage,
+      "總時數",
+      dateColumn,
+      totalY,
+      14,
+      customFont,
+      rgb(0, 0, 0),
+    );
+    if (isMarylandCertificate) {
+      drawCenteredText(
+        currentPage,
+        "Total Hours",
+        dateColumn,
+        totalY - 13,
+        9,
+        timesFont,
+        rgb(0, 0, 0),
+      );
+    }
     drawCenteredText(
       currentPage,
       `${totalHours}`,
@@ -421,6 +627,20 @@ app.post("/api/generate-cert-pdf", async (req, res) => {
       240,
       footerDateSize,
     );
+    if (isMarylandCertificate) {
+      const englishDate = now.toLocaleDateString("en-US", {
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+      });
+      currentPage.drawText(`Date: ${englishDate}`, {
+        x: footerDateX,
+        y: footerDateY - 22,
+        size: 11,
+        font: timesFont,
+        color: rgb(0, 0, 0),
+      });
+    }
 
     // 5. 輸出
     const pdfBytes = await pdfDoc.save();
@@ -809,6 +1029,56 @@ app.get("/api/admin/users/:role", async (req, res) => {
   }
 });
 
+app.get("/api/admin/semester-term", async (req, res) => {
+  try {
+    const term = await getActiveSemesterTerm();
+    res.json({ success: true, data: term });
+  } catch (error) {
+    console.error("取得學期設定失敗:", error);
+    res.status(500).json({ success: false, message: "伺服器發生錯誤" });
+  }
+});
+
+app.post("/api/admin/semester-term", async (req, res) => {
+  const { name, startDate, endDate } = req.body;
+  if (!name || !startDate || !endDate) {
+    return res.status(400).json({
+      success: false,
+      message: "請填寫學期名稱、開始日期與結束日期。",
+    });
+  }
+  if (startDate > endDate) {
+    return res.status(400).json({
+      success: false,
+      message: "學期結束日期必須晚於開始日期。",
+    });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("UPDATE semester_terms SET is_active = FALSE");
+    const result = await client.query(
+      `INSERT INTO semester_terms (name, start_date, end_date, is_active)
+       VALUES ($1, $2, $3, TRUE)
+       RETURNING id, name, start_date::text, end_date::text, is_active`,
+      [name, startDate, endDate],
+    );
+    await client.query("COMMIT");
+    res.json({
+      success: true,
+      message: "學期日期已更新。",
+      data: result.rows[0],
+    });
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    console.error("更新學期設定失敗:", error);
+    res.status(500).json({ success: false, message: "伺服器發生錯誤" });
+  } finally {
+    client.release();
+  }
+});
+
 // 🚀 臨時工具：重設管理員密碼
 app.get("/api/setup-admin", async (req, res) => {
   try {
@@ -913,6 +1183,28 @@ app.post("/api/match/request", async (req, res) => {
       return res.status(400).json({ success: false, message: "找不到小老師" });
     const tutorId = tutorRes.rows[0].id;
 
+    const acceptedCountRes = await pool.query(
+      "SELECT COUNT(*)::int AS count FROM match_requests WHERE tutor_id = $1 AND status = 'accepted'",
+      [tutorId],
+    );
+    if (acceptedCountRes.rows[0].count >= MAX_TUTEES_PER_TUTOR) {
+      return res.status(400).json({
+        success: false,
+        message: `每位小老師一學期最多可配對 ${MAX_TUTEES_PER_TUTOR} 位學生。`,
+      });
+    }
+
+    const pendingCountRes = await pool.query(
+      "SELECT COUNT(*)::int AS count FROM match_requests WHERE tutor_id = $1 AND status = 'pending'",
+      [tutorId],
+    );
+    if (pendingCountRes.rows[0].count >= MAX_PENDING_INVITES_PER_TUTOR) {
+      return res.status(400).json({
+        success: false,
+        message: `每次最多只能送出 ${MAX_PENDING_INVITES_PER_TUTOR} 位學生的邀請，請等待回覆後再送出新的邀請。`,
+      });
+    }
+
     const checkRes = await pool.query(
       "SELECT id FROM match_requests WHERE tutee_id = $1 AND status IN ('pending', 'accepted')",
       [tuteeUserId],
@@ -970,63 +1262,106 @@ app.get("/api/match/requests/:account", async (req, res) => {
 // 🚀 第十四支 API：外籍生回應邀請 (POST)
 app.post("/api/match/respond", async (req, res) => {
   const { requestId, tuteeAccount, tutorUserId, action } = req.body;
+  const client = await pool.connect();
   try {
-    const tuteeRes = await pool.query(
+    await client.query("BEGIN");
+
+    const tuteeRes = await client.query(
       "SELECT id FROM users WHERE account = $1",
       [tuteeAccount],
     );
     const tuteeId = tuteeRes.rows[0].id;
 
     if (action === "reject") {
-      await pool.query(
+      await client.query(
         "UPDATE match_requests SET status = 'rejected' WHERE id = $1",
         [requestId],
       );
+      await client.query("COMMIT");
       return res.json({ success: true, message: "已婉拒該邀請" });
     }
 
     if (action === "accept") {
-      await pool.query(
+      const requestRes = await client.query(
+        `SELECT id, tutor_id, tutee_id, status
+         FROM match_requests
+         WHERE id = $1 AND tutor_id = $2 AND tutee_id = $3
+         FOR UPDATE`,
+        [requestId, tutorUserId, tuteeId],
+      );
+      const request = requestRes.rows[0];
+      if (!request || request.status !== "pending") {
+        await client.query("ROLLBACK");
+        return res.status(400).json({
+          success: false,
+          message: "這筆邀請已不是待回覆狀態，請重新整理頁面。",
+        });
+      }
+
+      const tuteeActiveRes = await client.query(
+        "SELECT id FROM match_requests WHERE tutee_id = $1 AND status = 'accepted'",
+        [tuteeId],
+      );
+      if (tuteeActiveRes.rows.length > 0) {
+        await client.query("ROLLBACK");
+        return res.status(400).json({
+          success: false,
+          message: "您目前已有配對的小老師。",
+        });
+      }
+
+      const tutorAcceptedRes = await client.query(
+        "SELECT COUNT(*)::int AS count FROM match_requests WHERE tutor_id = $1 AND status = 'accepted'",
+        [tutorUserId],
+      );
+      if (tutorAcceptedRes.rows[0].count >= MAX_TUTEES_PER_TUTOR) {
+        await client.query("ROLLBACK");
+        return res.status(400).json({
+          success: false,
+          message: `這位小老師本學期已達 ${MAX_TUTEES_PER_TUTOR} 位學生上限。`,
+        });
+      }
+
+      await client.query(
         "UPDATE match_requests SET status = 'accepted' WHERE id = $1",
         [requestId],
       );
-      await pool.query(
+      await client.query(
         "UPDATE match_requests SET status = 'rejected' WHERE tutee_id = $1 AND status = 'pending'",
         [tuteeId],
       );
-      await pool.query(
+      await client.query(
         "UPDATE tutee_profiles SET matched_tutor_id = $1 WHERE user_id = $2",
         [tutorUserId, tuteeId],
       );
-      await pool.query(
-        "UPDATE tutor_profiles SET matched_tutee_id = $1 WHERE user_id = $2",
+      await client.query(
+        "UPDATE tutor_profiles SET matched_tutee_id = COALESCE(matched_tutee_id, $1) WHERE user_id = $2",
         [tuteeId, tutorUserId],
       );
 
-      await pool.query(
+      await client.query(
         `INSERT INTO match_history (tutor_id, tutee_id, is_active)
-     VALUES ($1, $2, TRUE)
-     ON CONFLICT DO NOTHING`,
+      VALUES ($1, $2, TRUE)
+      ON CONFLICT DO NOTHING`,
         [tutorUserId, tuteeId],
       );
 
-      // ← 新增：同時把這個 tutor 對其他 tutee 的 pending 邀請也全部拒絕
-      await pool.query(
+      // 配對成功後，這位 tutor 其他待回覆邀請回到初始可邀請狀態。
+      await client.query(
         `UPDATE match_requests SET status = 'rejected'
      WHERE tutor_id = $1 AND status = 'pending' AND tutee_id != $2`,
         [tutorUserId, tuteeId],
       );
 
-      // ← 新增：寫入配對歷史
-      await pool.query(
-        `INSERT INTO match_history (tutor_id, tutee_id, is_active)
-     VALUES ($1, $2, TRUE) ON CONFLICT DO NOTHING`,
-        [tutorUserId, tuteeId],
-      );
+      await client.query("COMMIT");
       return res.json({ success: true, message: "🎉 配對成功！" });
     }
   } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    console.error("回應邀請失敗:", error);
     res.status(500).json({ success: false });
+  } finally {
+    client.release();
   }
 });
 
@@ -1073,6 +1408,14 @@ app.get("/api/match/tutee-info/:tuteeId", async (req, res) => {
 app.post("/api/classes/schedule", async (req, res) => {
   const { tutorAccount, tuteeUserId, slots, isRecurring, endDate } = req.body;
   try {
+    const activeTerm = await getActiveSemesterTerm();
+    if (!activeTerm) {
+      return res.status(400).json({
+        success: false,
+        message: "尚未設定本學期日期，請先請管理員設定學期起訖日後再排課。",
+      });
+    }
+
     const tutorRes = await pool.query(
       "SELECT id FROM users WHERE account = $1",
       [tutorAccount],
@@ -1108,6 +1451,66 @@ app.post("/api/classes/schedule", async (req, res) => {
           nextDate.setDate(nextDate.getDate() + 7);
         }
       }
+    }
+
+    const teachingStart = timeToMinutes(TEACHING_DAY_START);
+    const teachingEnd = timeToMinutes(TEACHING_DAY_END);
+    let newHours = 0;
+
+    for (const cls of classInstances) {
+      const classDate = toDateOnly(cls.date);
+      const classStart = timeToMinutes(cls.start);
+      const classEnd = timeToMinutes(cls.end);
+      const duration = hoursBetween(cls.start, cls.end);
+
+      if (classDate < activeTerm.start_date || classDate > activeTerm.end_date) {
+        return res.status(400).json({
+          success: false,
+          message: `課程日期必須在本學期期間內（${activeTerm.start_date} 至 ${activeTerm.end_date}）。`,
+        });
+      }
+
+      if (classStart < teachingStart || classEnd > teachingEnd) {
+        return res.status(400).json({
+          success: false,
+          message: `上課時間只能安排在 ${TEACHING_DAY_START} 至 ${TEACHING_DAY_END} 之間。`,
+        });
+      }
+
+      if (duration <= 0) {
+        return res.status(400).json({
+          success: false,
+          message: "時間設定有誤，結束時間必須晚於開始時間。",
+        });
+      }
+
+      newHours += duration;
+    }
+
+    const pairExistingHours = await getScheduledHours(pool, {
+      tutorId,
+      tuteeId: tuteeUserId,
+      startDate: activeTerm.start_date,
+      endDate: activeTerm.end_date,
+    });
+    const tutorExistingHours = await getScheduledHours(pool, {
+      tutorId,
+      startDate: activeTerm.start_date,
+      endDate: activeTerm.end_date,
+    });
+
+    if (pairExistingHours + newHours > MAX_HOURS_PER_TUTOR_TUTEE_PAIR) {
+      return res.status(400).json({
+        success: false,
+        message: `同一位小老師輔導同一位學生，每學期最多 ${MAX_HOURS_PER_TUTOR_TUTEE_PAIR} 小時；目前已排 ${pairExistingHours.toFixed(1)} 小時，本次新增 ${newHours.toFixed(1)} 小時會超過上限。`,
+      });
+    }
+
+    if (tutorExistingHours + newHours > MAX_HOURS_PER_TUTOR_SEMESTER) {
+      return res.status(400).json({
+        success: false,
+        message: `每位小老師每學期最多可排 ${MAX_HOURS_PER_TUTOR_SEMESTER} 小時；目前已排 ${tutorExistingHours.toFixed(1)} 小時，本次新增 ${newHours.toFixed(1)} 小時會超過上限。`,
+      });
     }
 
     for (const cls of classInstances) {
@@ -1162,6 +1565,74 @@ app.get("/api/classes/:userId", async (req, res) => {
 app.put("/api/classes/:id", async (req, res) => {
   const { classDate, startTime, endTime } = req.body;
   try {
+    const activeTerm = await getActiveSemesterTerm();
+    if (!activeTerm) {
+      return res.status(400).json({
+        success: false,
+        message: "尚未設定本學期日期，請先請管理員設定學期起訖日後再修改課程。",
+      });
+    }
+
+    const classRes = await pool.query(
+      "SELECT id, tutor_id, tutee_id FROM classes WHERE id = $1",
+      [req.params.id],
+    );
+    const cls = classRes.rows[0];
+    if (!cls) {
+      return res.status(404).json({ success: false, message: "找不到課程" });
+    }
+
+    const dateOnly = toDateOnly(classDate);
+    const duration = hoursBetween(startTime, endTime);
+    if (dateOnly < activeTerm.start_date || dateOnly > activeTerm.end_date) {
+      return res.status(400).json({
+        success: false,
+        message: `課程日期必須在本學期期間內（${activeTerm.start_date} 至 ${activeTerm.end_date}）。`,
+      });
+    }
+    if (
+      timeToMinutes(startTime) < timeToMinutes(TEACHING_DAY_START) ||
+      timeToMinutes(endTime) > timeToMinutes(TEACHING_DAY_END)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: `上課時間只能安排在 ${TEACHING_DAY_START} 至 ${TEACHING_DAY_END} 之間。`,
+      });
+    }
+    if (duration <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "時間設定有誤，結束時間必須晚於開始時間。",
+      });
+    }
+
+    const pairExistingHours = await getScheduledHours(pool, {
+      tutorId: cls.tutor_id,
+      tuteeId: cls.tutee_id,
+      startDate: activeTerm.start_date,
+      endDate: activeTerm.end_date,
+      excludeClassId: cls.id,
+    });
+    const tutorExistingHours = await getScheduledHours(pool, {
+      tutorId: cls.tutor_id,
+      startDate: activeTerm.start_date,
+      endDate: activeTerm.end_date,
+      excludeClassId: cls.id,
+    });
+
+    if (pairExistingHours + duration > MAX_HOURS_PER_TUTOR_TUTEE_PAIR) {
+      return res.status(400).json({
+        success: false,
+        message: `同一位小老師輔導同一位學生，每學期最多 ${MAX_HOURS_PER_TUTOR_TUTEE_PAIR} 小時，修改後會超過上限。`,
+      });
+    }
+    if (tutorExistingHours + duration > MAX_HOURS_PER_TUTOR_SEMESTER) {
+      return res.status(400).json({
+        success: false,
+        message: `每位小老師每學期最多可排 ${MAX_HOURS_PER_TUTOR_SEMESTER} 小時，修改後會超過上限。`,
+      });
+    }
+
     await pool.query(
       "UPDATE classes SET class_date = $1, start_time = $2, end_time = $3 WHERE id = $4",
       [classDate, startTime, endTime, req.params.id],
@@ -2649,11 +3120,14 @@ app.get("/api/tutee/classes-history/:userId", async (req, res) => {
         u.english_name  AS tutor_english_name,
         cn.id           AS note_id,
         cn.content      AS note_content,
-        cn.location     AS note_location
+        cn.location     AS note_location,
+        hr.status       AS hours_review_status
       FROM classes c
       LEFT JOIN users u ON c.tutor_id = u.id
       LEFT JOIN class_notes cn
         ON cn.class_id = c.id AND cn.user_id = $1
+      LEFT JOIN hours_review hr
+        ON hr.class_id = c.id
       WHERE c.tutee_id = $1
         AND c.status != 'cancelled'
       ORDER BY c.class_date DESC, c.start_time DESC
